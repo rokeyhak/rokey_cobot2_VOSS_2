@@ -102,3 +102,16 @@ def test_hollow_label_reason_fill() -> None:
 
 def test_no_belt_candidates_none() -> None:
     assert detect_candidates(np.full((1080, 1920, 3), 200, np.uint8)) == (None, [])
+
+
+@pytest.mark.parametrize("angle", [0, 15, 30, 45, -30, 90])
+def test_half_axis_follows_label_long_side(angle: float) -> None:
+    """S2-T16: Detection.half_axis = 중심 → 송장 긴 변 끝(픽셀). frame() 의 송장 긴 변은 각 0 에서 세로(v)다."""
+    (d,) = detect_boxes(frame((1130, 600), angle))
+    hx, hy = d.half_axis
+    assert np.hypot(hx, hy) == pytest.approx(LABEL[0] / 2, abs=4)
+    want = np.arctan2(
+        np.cos(np.radians(angle)), -np.sin(np.radians(angle))
+    )  # boxPoints 의 높이 방향
+    diff = (np.arctan2(hy, hx) - want + np.pi / 2) % np.pi - np.pi / 2  # 180° 대칭
+    assert abs(np.degrees(diff)) < 1.5

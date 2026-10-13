@@ -1,6 +1,7 @@
 # voss_vision — 남현지 (@lambdaramji, 비전 컨테이너에서 실행)
 노드: box_tracker (/camera/color/image_raw → /voss/vision/box 30 Hz + /voss/vision/label_crop 선명 프레임), label_reader (크롭 → PaddleOCR → 퍼지 매칭 → /voss/vision/label, stage 1·2·3).
 - 깊이 사용 금지. RGB + 박스 높이 27 mm. 픽셀 → 베이스 변환은 비전 단일 책임 → `BoxTrack.position_base`(관측 박스 윗면 중심, m. TCP 목표 아님 — 서보가 계산).
+- **yaw (S2-T16, TR-SERVO-04 — 제안)**: `BoxTrack.yaw_base`·`yaw_valid` = 박스 긴 변(46 mm)의 베이스 XY 각, rad, (−π/2, π/2]. seg 가 송장 minAreaRect 긴 변(`Detection.half_axis`)을 주고, box_tracker 가 중심 ± 그 벡터 두 점을 position 과 **같은 출처·같은 변환**으로 옮겨 `tracker_logic.choose_yaw`. J6 회전은 pose 에 들어 있다(시험: test_box_tracker_yaw·test_hand_eye). 실기 J6 0·15·30·45° 오차는 미측정 — 그 전에는 관측 기록용. BoxTrack 해시가 바뀌어 호스트·비전 컨테이너를 함께 다시 빌드한다.
   - 관측 자세 정지: `belt_plane.pixel_to_base_xy` + `config/belt_homography.yaml` (ADR-0003, `calib_hull_px` 밖은 무효).
   - **이동 중: G0 필수.** 핸드아이(`config/hand_eye.yaml` 10/08 확정, `moving_verified: true`, 수직 공구에서만 유효) + **촬영 시각 + `pose_lag_ms`(15, gateway `pose_source:=joint_states` 기준 #140 — `service` 면 60) 의 pose**(보간, 아직 없으면 80 ms 까지 앞으로 외삽) + 박스 윗면 평면 교점(`HAND_EYE`). calibration.md·ADR-0003 10/08.
   - **`pose_lag_ms` 다시 재기**: pose 소스(#118 `service`/`joint_states`)를 바꾸면 stamp 의미가 바뀌므로 `tools/calib/pose_lag_eval.py`(계산 `pose_lag.py`)로 다시 잰다. 합성 시험: 계단 pose(0.1 s)에 지연 60 ms 면 고른 lag ≈ 90 ms·이동 최대 1.7 mm, 부드러운 pose·지연 0 이면 0 ms·0.3 mm — 계단은 갱신 간격 절반쯤 지연을 더한다.

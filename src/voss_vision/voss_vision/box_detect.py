@@ -64,6 +64,15 @@ class Candidate:
     det: Detection | None = None  # 통과했을 때만
 
 
+def half_long_axis(rot) -> tuple[float, float]:
+    """minAreaRect ((cx, cy), (w, h), 각) → 중심에서 긴 변 끝까지의 픽셀 벡터 (S2-T16 yaw).
+    OpenCV 각도 규칙에 기대지 않고 꼭짓점에서 긴 변을 고른다. 방향 부호(±)는 yaw 를 180° 접어 상관없다."""
+    c = cv2.boxPoints(rot)
+    e1, e2 = c[1] - c[0], c[2] - c[1]
+    e = e1 if np.hypot(*e1) >= np.hypot(*e2) else e2
+    return float(e[0] / 2), float(e[1] / 2)
+
+
 def detect_boxes(bgr: np.ndarray, p: SegParams = DEFAULT_PARAMS) -> list[Detection]:
     """한 프레임 → 박스 검출 목록(원본 픽셀 좌표). 벨트가 안 보이면 빈 목록."""
     return [c.det for c in _judge(bgr, p, keep_rejected=False)[1] if c.det is not None]
@@ -133,7 +142,11 @@ def _judge(bgr: np.ndarray, p: SegParams, keep_rejected: bool):
         x1, y1 = np.ceil(corners.max(0)).astype(int)
         score = float(min(1.0, fill))
         det = Detection(
-            float(cx * k), float(cy * k), (int(x0), int(y0), int(x1 - x0), int(y1 - y0)), score
+            float(cx * k),
+            float(cy * k),
+            (int(x0), int(y0), int(x1 - x0), int(y1 - y0)),
+            score,
+            half_long_axis(rot),
         )
         out.append(Candidate(rect, float(area), "", rot, float(long_ / short), float(fill), det))
     return (roi[0] * k, roi[1] * k), out

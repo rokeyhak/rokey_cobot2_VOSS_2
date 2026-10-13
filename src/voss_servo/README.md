@@ -2,7 +2,7 @@
 
 컨베이어 위 박스를 따라가며 내려가 RG2 로 집고 들어 올려 확인까지 하는 노드 `belt_servo` 패키지. 박스 관측(`/voss/vision/box`)과 로봇 TCP(`/voss/robot/pose`)를 받아 30 Hz 속도 명령(`/voss/robot/servo_cmd`)을 내고, sort_manager 에 액션 `/voss/servo/track_and_grasp` 를 제공한다.
 
-**현황 (10/11):** 10/10 G0 1회차 완주(TrackAndGrasp `OK`, 시도 1) · G1 s1 **20사례 중 20 성공**, 모두 시도 1([measurements-1010](../../docs/measurements-1010.md)) · 테스트 243개 통과(`colcon test-result`: `243 tests, 0 errors, 0 failures, 0 skipped`).
+**현황 (10/13):** 10/10 G0 1회차 완주 · G1 s1 **20사례 중 20 성공**, 모두 시도 1([measurements-1010](../../docs/measurements-1010.md)). 10/12 U9 실기([measurements-1012](../../docs/measurements-1012.md)): s2 미니 게이트 5/5(+1) · 비스듬히 3/3 DESCEND LOST 0 · 폭 밖 안전 후퇴 3/3, s3(FF 4.73) 5/5. 테스트 470개 통과(main `44e3ff3` 기준 `colcon test-result`: `470 tests, 0 errors, 0 failures, 0 skipped`).
 
 설계 이유는 [DESIGN.md](DESIGN.md)(결정 카드)와 [design/](design/)(단위별 HLD·DD·pseudo·run)에 있다. 이 README 는 "무엇이 어디 있고 어떻게 돌리나"만 적는다.
 
@@ -17,7 +17,7 @@
 | | `voss_config.yaml` 직접 읽기 — launch 가 값만 넘긴다 (규칙 5) |
 
 - 담당: 박병후(@ok778ts123). 리뷰어(CODEOWNERS `/src/voss_servo/`): 김학민(@rokeyhak).
-- 이슈: T25 #34 · T26 #35 · T27 #36 · T28 #37 · T29 #38, 게이트 #13.
+- 이슈(옛 레포 lambdaramji 번호): T25 #34 · T26 #35 · T27 #36 · T28 #37 · T29 #38, 게이트 #13. 새 레포(rokeyhak/rokey_cobot2_VOSS_2)는 이슈 번호 규칙(작업 ID + 9)을 쓰지 않고 브랜치·커밋에 작업 ID 를 직접 쓴다(예: `fix/S2-T29-voss_servo-…`, ADR-0015).
 
 ## 2. 인터페이스
 
@@ -41,14 +41,14 @@ box 구독 depth 5 는 소비자 재량이다(발행 쪽 depth 1 과 호환, top
 | reason | action status | 뜻 |
 |---|---|---|
 | `OK` | SUCCEEDED | LIFT·VERIFY 완료 = 인계. `grasped=true` |
-| `GRASP_FAILED` | ABORTED | 쥠 판정 실패(감지 없음·폭 범위 밖·VERIFY 에서 놓침) |
-| `LOST` | ABORTED | 내 track_id 가 `input.lost_timeout_s` 동안 안 옴 |
+| `GRASP_FAILED` | ABORTED | 쥠 판정 실패(감지 없음·폭 범위 밖·VERIFY 에서 놓침)이고 재시도 한도 소진 또는 x 여유 없음. GRASP 에서 실패하면 들기 높이까지 안전 후퇴한 뒤 result |
+| `LOST` | ABORTED | 내 track_id 가 `input.lost_timeout_s` 동안 안 옴 (로그 cause 로 `VISION_DOWN`·`ROBOT_STALLED` 세분) |
 | `OUT_OF_REACH` | ABORTED | 추종 구간 x 끝, 파지 높이 도달 불가, 또는 정렬 시점 x 여유 부족 |
 | `STALE_INPUT` | ABORTED | `position_valid=false` 또는 pose 끊김이 `input.stale_timeout_s` 지속 |
-| `DEVICE_ERROR` | ABORTED | 그리퍼·stop 서비스 실패, 내부 예외, 노드 종료 |
+| `DEVICE_ERROR` | ABORTED | 그리퍼·stop 서비스 실패, 하강 사각 체류 상한 초과, 후퇴 상승 시간 초과, 내부 예외, 노드 종료. GRASP 등 낮은 자리의 그리퍼 오류는 후퇴 뒤 result |
 | `CANCELED` | CANCELED | 취소 후 `/voss/robot/stop` 정상 응답 |
 
-`grasped=false` 는 "인계 미완료"이지 빈손이 아니다 — belt_servo 는 끝난 뒤 그리퍼를 자동으로 열지 않는다. 세부 원인은 로그의 `cause` 에 남는다(예: `BOX_MISSING`, `BOX_INVALID`, `POSE_MISSING`, `REACH_X_MAX`, `REACH_GRASP_ROOM`, `NOT_DETECTED`, `WIDTH_OUT`, `DROPPED`, `GRIPPER_<코드>`, `STOP_OK`, `NODE_SHUTDOWN`, `INTERNAL_EXCEPTION`).
+`grasped=false` 는 "인계 미완료"이지 빈손이 아니다 — belt_servo 는 **goal 이 끝난 뒤에는** 그리퍼를 자동으로 열지 않는다(goal 안에서 여는 것은 사전 개방·재시도 재개방·`WIDTH_OUT` 후퇴 개방뿐, 모두 result 전). 세부 원인은 로그의 `cause` 에 남는다(예: `BOX_MISSING`, `BOX_INVALID`, `POSE_MISSING`, `REACH_X_MIN`·`REACH_X_MAX`·`REACH_Z_MIN`, `REACH_GRASP_ROOM`, `NOT_DETECTED`, `WIDTH_OUT`, `DROPPED`, `GRIPPER_<코드>`·`GRIPPER_NOT_OK`, `DESCEND_BLIND_TIMEOUT`, `RETREAT_TIMEOUT`, `VISION_DOWN`, `ROBOT_STALLED`, `STOP_OK`·`STOP_FAILED_<message>`·`STOP_TIMEOUT`·`STOP_UNAVAILABLE`, `NODE_SHUTDOWN`, `INTERNAL_EXCEPTION`). `VISION_DOWN`·`ROBOT_STALLED` 는 reason `LOST` 일 때 원인을 나눠 적는 로그 전용 값이고 전이에는 영향이 없다 — 원래 fsm cause 는 `cause_fsm` 에 남는다.
 
 ## 3. 디렉터리 구조
 
@@ -56,7 +56,9 @@ box 구독 depth 5 는 소비자 재량이다(발행 쪽 depth 1 과 호환, top
 src/voss_servo/
 ├── CLAUDE.md                 패키지 요약 (Claude·팀원용)
 ├── DESIGN.md                 결정 카드 BH-DEC-01~18, 미확정 경계
-├── design/                   단위별 설계: U1(뼈대)·U2(제어)·U3(launch·sim)·U5(파지) 의 hld/dd/pseudo, U3-run·U6-run 절차서
+├── design/                   단위별 설계 hld/dd/pseudo/run: U1(뼈대)·U2(제어)·U3(launch·sim)·U5(파지)·U6-run(게이트 집계)
+│                             ·U9a(하강 LOST 경주)·U9b(안전 후퇴·재시도)·U9c(값·cause·진단 로그)·U9-run(10/12 실기 절차)
+│                             ·U-E(두산 에뮬레이터 전 구간 가상 시험)·S2T14(사다리꼴 z 프로파일)·FIELD-1010-analysis
 ├── config/
 │   ├── belt_servo.yaml                 기본 파라미터 (미측정 = null)
 │   ├── belt_servo_real.yaml.example    실기 값 파일 틀 (복사해서 레포 밖에 둔다)
@@ -70,15 +72,18 @@ src/voss_servo/
 │   ├── fsm.py                픽업 상태기계 (전이·reason·attempts·쥠 판정)
 │   ├── control.py            예측·TCP 외삽·FF+P·Z 계획·clamp·영역
 │   ├── grip.py               그리퍼 호출 생애·message 코드·x 여유
+│   ├── diagnose.py           진단 계산(LOST 원인 세분·정지 감지·벨트 속도 추정) — 로그·경고 전용
 │   ├── log_schema.py         틱·시도 로그 레코드, JSONL 쓰기
 │   ├── launch_params.py      launch 파라미터 합치기 (null 제거·형 맞추기)
 │   ├── fake_box.py           가짜 /voss/vision/box (sim)
+│   ├── fake_gripper.py       가짜 RG2 서비스 /voss/sim/gripper (sim, 응답 계획 empty/held/wide)
 │   ├── sim_check.py          sim 자동 실행·판정
-│   └── gate_summary.py       시도 로그 → G1 기록표
-└── test/                     pytest 13개 파일 (5절 표)
+│   ├── gate_summary.py       시도 로그 → G1 기록표
+│   └── z_compare.py          z 프로파일 p vs trapezoid 비교표
+└── test/                     pytest 18개 파일 (5절 표)
 ```
 
-실행 파일(setup.py): `belt_servo` · `fake_box` · `sim_check` · `gate_summary`.
+실행 파일(setup.py): `belt_servo` · `fake_box` · `fake_gripper` · `sim_check` · `gate_summary` · `z_compare`.
 
 ## 4. 동작 구조
 
@@ -95,7 +100,8 @@ src/voss_servo/
   ③ _handle_actions ─▶ /voss/robot/gripper, /voss/robot/stop  (call_async, 기다리지 않음)
   ④ control.command : 새 phase 기준 속도 → clamp (stopping·terminal 이면 0)
   ⑤ servo_cmd 발행 · feedback(phase) 발행
-  ⑥ 로그 ─┬─ 틱 로그   <log.dir>/ticks/servo_ticks_<시각>.jsonl     (매 틱, git 미추적)
+  ⑥ 로그 (LOST 면 diagnose 로 cause 세분, 진단 키 기록)
+        ─┬─ 틱 로그   <log.dir>/ticks/servo_ticks_<시각>.jsonl     (매 틱, git 미추적)
           └─ 시도 로그 <log.dir>/attempts/servo_attempts_<시각>.jsonl (ATTEMPT_END·GOAL_END, 게이트 증거)
   ⑦ 종료면 result 를 채우고 zero_hold_s 동안 0 을 계속 발행
 ```
@@ -104,27 +110,40 @@ src/voss_servo/
 
 ### 4.2 픽업 상태기계 (`fsm.py`)
 
-```
-goal ─▶ PREPARE ──개방 응답──▶ TRACK ──정렬(aligned)──▶ DESCEND ──파지 높이──▶ GRASP
-         (사전 개방 요청)          │ x 여유 부족 → OUT_OF_REACH          (닫기 요청, attempts+1)
-                                                                              │ HELD
-        OK(grasped=true) ◀──HELD── VERIFY ◀──들기 높이── LIFT ◀────────────────┘
-                              (재닫기 요청)
+```mermaid
+flowchart LR
+  G([goal]) --> PREP[PREPARE<br/>개방 요청]
+  PREP -->|개방 응답| TRACK
+  TRACK -->|정렬| DESC[DESCEND]
+  TRACK -->|정렬 순간 x 여유 부족| OOR([OUT_OF_REACH])
+  DESC -->|파지 높이| GRASP[GRASP<br/>닫기 요청, attempts+1]
+  DESC -->|사각 체류 상한 초과| DEV([DEVICE_ERROR<br/>DESCEND_BLIND_TIMEOUT])
+  GRASP -->|HELD| LIFT
+  LIFT -->|들기 높이| VERIFY[VERIFY<br/>재닫기]
+  VERIFY -->|HELD| OK([OK grasped=true])
+  VERIFY -->|놓침| DROP([GRASP_FAILED<br/>DROPPED, 후퇴 없음])
+  GRASP -->|NOT_DETECTED + 시도 남음 + x 여유| PREP
+  GRASP -->|그 밖 NOT_HELD · 그리퍼 오류| RET[안전 후퇴 phase LIFT<br/>WIDTH_OUT 이면 OPENING → RISING]
+  RET -->|들기 높이| FAIL([GRASP_FAILED<br/>또는 DEVICE_ERROR])
 ```
 
 | phase | XY 속도 | Z | 그리퍼 |
 |---|---|---|---|
 | PREPARE | 보이면 FF+P, 안 보이면 FF | 접근 높이로 | 개방 요청 |
 | TRACK | 보이면 FF+P, 잠깐 안 보이면 FF | 접근 높이 유지 | — |
-| DESCEND | 사각 전 FF+P, 사각 구간 FF 만 | 파지 높이로 | — |
+| DESCEND | 사각 전 FF+P, 사각 구간 FF 만 | 파지 높이로 (`z.profile` p = P 제어, trapezoid = 사다리꼴) | — |
 | GRASP | FF 만 | 고정 | 닫기 요청 |
-| LIFT | 0 | 들기 높이로 | — |
+| LIFT | 0 | 들기 높이로 (DESCEND 와 같은 프로파일) | — |
 | VERIFY | 0 | 0 | 닫기 재전송으로 확인 |
+| LIFT (안전 후퇴) | 핑거 끝이 윗면 + 10 mm(`RETREAT_CLEAR_MM`)를 넘거나 x_max 에 닿을 때까지 FF, 그 뒤 0 | OPENING 동안 고정 → RISING 에서 들기 높이로 | `WIDTH_OUT` 이면 먼저 개방(OPENING) |
 
 - 한 틱에 전이표 위에서부터 처음 맞는 한 줄만 적용한다: 취소·stop 대기 → 그리퍼 실패 → 입력(pose·box) → 영역 → 정상 진행.
 - GRASP → LIFT 는 닫힘 응답 + `grip_detected` + 보고 폭이 `grasp.hold_width_min_mm`~`max_mm` 안일 때만. 닫힘만으로는 올라가지 않는다.
 - 비전 사각 구간(TCP 가 박스 윗면 + `z.vision_cutoff_above_top_mm` 아래, 그리고 GRASP·LIFT·VERIFY)에서는 박스 미수신을 LOST/STALE 로 보지 않고 마지막 유효 관측 + 벨트 속도로 간다. pose 끊김은 사각에서도 STALE_INPUT.
-- 상태기계 표와 전이 번호: [design/U1-dd.md](design/U1-dd.md) 2절, x 여유: [design/U5-hld.md](design/U5-hld.md).
+- **사각 체류 상한(U9-a):** DESCEND 가 사각에 들어간 뒤 `control.descend_blind_max_s`(사각 진입 → 파지 높이 예상 시간 + `BLIND_DWELL_MARGIN_S` 1.0 s; p 프로파일·시연 값에서 3.44 s, trapezoid 2.50 s)를 넘기면 `DEVICE_ERROR`(cause `DESCEND_BLIND_TIMEOUT`). 이 종료는 후퇴하지 않고 그 자리에서 0 유지.
+- **안전 후퇴(U9-b):** GRASP 의 NOT_HELD 중 재시도하지 않는 경우와, 낮은 자리(GRASP·재시도 재상승·후퇴 중)의 그리퍼 오류는 phase `LIFT` 로 들기 높이까지 올라간 뒤 result 를 낸다. `WIDTH_OUT` 은 먼저 열고(OPENING, 개방 응답 또는 `grasp.close_time_max_s` 초과·x_max 도달까지 z 고정) 올라간다(RISING). RISING 이 `control.lift_max_s`(들기 예상 + 1.0 s)를 넘기면 `DEVICE_ERROR`(cause `RETREAT_TIMEOUT`). 후퇴 중 pose 끊김은 `STALE_INPUT`(`POSE_MISSING`), 취소는 `CANCELED`(그 자리 정지).
+- **재시도(U9-b):** `NOT_DETECTED` 이고 시도가 남았고(`retry.max_attempts`, 계약 최대 3) 실패 자리의 x 여유(`control.retry_room_ok`: 재상승 + 하강 + 닫힘 상한 동안 벨트 이동 + `room_margin_mm`)가 있을 때만 PREPARE 로 돌아가 다시 연다. `DROPPED`·`WIDTH_OUT` 은 재시도하지 않는다. 기본 `max_attempts` 1 이고, 시연 값(x_max 550 · close 2.5)에서 재시도 가능한 실패 x 는 ≤ 약 166 mm 라 현장 정렬 x(10/10~12 실측 67~132 mm)에서는 켜도 후퇴로 끝난다(재시도는 sim `retry` 로만 입증).
+- 상태기계 표와 전이 번호: [design/U1-dd.md](design/U1-dd.md) 2절, x 여유: [design/U5-hld.md](design/U5-hld.md), 사각 경주: [design/U9a-hld.md](design/U9a-hld.md), 후퇴·재시도: [design/U9b-hld.md](design/U9b-hld.md), cause 세분·진단 키: [design/U9c-hld.md](design/U9c-hld.md).
 
 ### 4.3 안전 규칙 (코드로 보장)
 
@@ -134,6 +153,8 @@ goal ─▶ PREPARE ──개방 응답──▶ TRACK ──정렬(aligned)─�
 | goal 이 어떻게 끝나든 종료 틱은 0, 이어서 `zero_hold_s` 동안 0 반복. 진행·0 유지 중이거나 `track_id ≤ 0` 인 goal 은 reject | `_finish`·`_start_hold`·`_tick_hold` |
 | 0 명령에는 가속 제한을 걸지 않는다 (멈출 때는 바로 0) | `control.clamp` |
 | goal 이 끝난 뒤 그리퍼 요청을 새로 보내지 않고, 늦게 온 응답은 버린다 | `grip.py`, `_orphan_gripper`·`_on_grip_late` |
+| 파지 실패·낮은 자리 그리퍼 오류는 파지 높이에서 끝내지 않고 들기 높이까지 후퇴한 뒤 result (상승 시간 상한 → `RETREAT_TIMEOUT`) | `fsm._retreat`·`_advance_retreat`, `control.retreat_xy`·`lift_max_s` |
+| 하강 사각 구간에 상한보다 오래 머물면 끝낸다 (`DESCEND_BLIND_TIMEOUT`) | `fsm.blind_overstay`, `control.descend_blind_max_s` |
 | Ctrl+C·SIGTERM: rclpy 시그널 처리기를 끄고 첫 신호에서 이후 신호를 무시한 뒤, context 가 살아 있을 때 0 을 한 번 보내고 로그를 닫는다. 진행 중 goal 은 `DEVICE_ERROR`(cause `NODE_SHUTDOWN`) | `main`·`_on_stop_signal`·`destroy_node` |
 | SIGKILL 등 강제 종료 때의 정지는 robot_gateway watchdog 책임 | ADR-0010 |
 
@@ -141,16 +162,19 @@ goal ─▶ PREPARE ──개방 응답──▶ TRACK ──정렬(aligned)─�
 
 | 모듈 | 책임 | 순수 | 들어가는 값 → 나오는 값 | 테스트 |
 |---|---|---|---|---|
-| `params.py` | 키 표 `PARAM_SPECS`(38키), 형·범위·교차 검사, `params_sha256` | 예 | 파라미터 dict → `ReadyReport`(ready·missing·invalid) | `test_params.py` |
-| `fsm.py` | phase 전이, reason·cause, attempts, `judge_grip`, 사각 판정 | 예 | `FsmState` + `TickEvent` → `Transition`(다음 상태·행동) | `test_fsm.py` |
-| `control.py` | `predict`·`tcp_now`·`tcp_target`·`split_error`·`ff_p`·`z_plan`·`clamp`·`in_reach`, 입구 `geometry`·`command` | 예 (NumPy, 단위 m·m/s·s) | 관측·pose·설정 → `Geometry` / `Command`(속도·clamped) | `test_control.py` |
+| `params.py` | 키 표 `PARAM_SPECS`(39키, 선택 키 `z.profile` 포함), 형·범위·교차 검사, `params_sha256`, 상수(`BLIND_DWELL_MARGIN_S`·`RETREAT_CLEAR_MM`·`MAX_ATTEMPTS`) | 예 | 파라미터 dict → `ReadyReport`(ready·missing·invalid) | `test_params.py` |
+| `fsm.py` | phase 전이, reason·cause, attempts, `judge_grip`, 사각 판정·체류 상한, 안전 후퇴(`_retreat`)·재시도 | 예 | `FsmState` + `TickEvent` → `Transition`(다음 상태·행동) | `test_fsm.py` |
+| `control.py` | `predict`·`tcp_now`·`tcp_target`·`split_error`·`ff_p`·`z_plan`·`z_law`·`z_speed`·`z_speed_trap`·`clamp`·`in_reach`, 시간 계산 `z_move_time_s`·`descend_blind_max_s`·`lift_max_s`·`grasp_room_need_s`·`retry_need_s`, 후퇴·재시도 `retreat_xy`·`retry_room_ok`, 벨트 속도 `belt_speed_fit`, 입구 `geometry`·`command` | 예 (NumPy, 단위 m·m/s·s) | 관측·pose·설정 → `Geometry` / `Command`(속도·clamped) | `test_control.py`·`test_z_profile.py`·`test_race.py` |
 | `grip.py` | 호출 이름표·순번, `message` → 코드, `poll`(응답·BUSY 재요청·TIMEOUT), `descend_time_s`·`grasp_room_ok` | 예 | `GripCall` + 응답·시각 → `PollResult` | `test_grip.py` |
+| `diagnose.py` | LOST cause 세분(`VISION_DOWN`·`ROBOT_STALLED`), TCP 실측 속도·정지 틱, 벨트 속도 추정 경고 문장 — 로그·경고 전용, 전이에 영향 없음 | 예 | pose·명령 속도·수신 시각 → 진단 값·cause | `test_diagnose.py` |
 | `log_schema.py` | 틱·시도 레코드(시도 키 ⊂ 틱 키), JSON 한 줄, `JsonlWriter` | 쓰기만 아님 | 틱 값 → JSON 줄 / 파일 | `test_log_schema.py` |
 | `belt_servo.py` | ROS 연결, 이벤트 모으기, 서비스 호출, 로그 채우기 | 아니오 | 메시지 → 메시지·로그 | `test_node.py`·`test_action_e2e.py`·`test_shutdown.py` |
 | `launch_params.py` | YAML 평탄화·null 제거·overrides·voss_config 키와 지문·형 맞추기 | 예 | YAML 경로들 → `BuildResult`(params·warnings) | `test_launch_params.py` |
 | `fake_box.py` | 시나리오별 박스 위치 계산 + 30 Hz 발행 노드 | 계산 부분만 | 시각·시나리오 → `BoxSample` | `test_fake_box.py` |
+| `fake_gripper.py` | 응답 계획(empty/held/wide)대로 답하는 가짜 RG2 서비스 노드 | `parse_plan`·`fake_reply` 만 | 계획·요청 폭 → 응답(ok·폭·grip_detected) | `test_fake_gripper.py` |
 | `sim_check.py` | sim 기동·goal·정리, `judge_*` 판정, 표·종료 코드 | 판정 부분만 | result·틱 로그·launch.log → `Verdict` | `test_sim_check.py` |
 | `gate_summary.py` | 시도 로그 → g1-gate 11열 표·자동 힌트·"측정:" 문장 | 파싱·집계·렌더 부분 | `servo_attempts_*.jsonl` → Markdown | `test_gate_summary.py` |
+| `z_compare.py` | z 프로파일 p vs trapezoid 단계 시간·착지 z·err_along 비교표 (OK goal 만 시간 집계) | `summarize`·`format_md` 만 | 시도·틱 로그 → Markdown | `test_z_compare.py` |
 
 `test_smoke.py` 는 import 확인. `test_action_e2e.py`·`test_node.py` 는 실행별 도메인(150 + pid % 70)을 쓴다.
 
@@ -162,15 +186,16 @@ goal ─▶ PREPARE ──개방 응답──▶ TRACK ──정렬(aligned)─�
 |---|---|---|
 | launch 가 voss_config 에서 넘김 | `belt.speed_cmps`·`belt.direction_base`·`gripper.pre_open_mm`·`grasp_width_mm`·`force_n`·`timing.latency_offset_ms`·`config_version`·`config_sha256` | **이 패키지 YAML 에 쓰면 launch 가 멈춘다** (규칙 5) |
 | `grasp.*` | `tcp_z_below_top_mm` 19.0 | 결정값 (pending #16, ADR-0009) |
-| | `hold_width_min_mm` 39.5 · `hold_width_max_mm` 43.5 · `close_time_max_s` 2.1 | T34 측정(measurements-1008 #14) 기반, 경계값은 제안 |
+| | `hold_width_min_mm` 39.5 · `hold_width_max_mm` 44.0 · `close_time_max_s` 2.5 | 폭: T34 측정(measurements-1008 #14) + 10/10 현장값 44.0(measurements-1010 #10, U-F). 닫힘 상한: 2.1 → 2.3(U9-c) → 2.5(S2-T29, 10/12 최대 2.467 s). 경계값은 제안 |
 | | `room_margin_mm` 10.0 | 제안 (판단값) |
-| `reach.*` | `x_min_mm` −107.0 · `x_max_mm` 620.0 | 측정(measurements #6) · 유효값 |
+| `reach.*` | `x_min_mm` −107.0 · `x_max_mm` 550.0 | 측정(measurements #6) · 유효값. x_max 620 → 600(U9-c, x ≥ 600 z 처짐) → 550(S2-T29, 특이점 안내 x≈564.5) |
 | `control.*` | `kp_per_s`·`kp_z_per_s`·`align_tol_along_mm`·`align_tol_cross_mm` | null (제안값은 주석) |
 | `limits.*` | `max_speed_mps`·`max_acc_mps2` | null (제안 0.08 · 0.1) |
-| `z.*` | `approach_above_top_mm`·`lift_above_top_mm`·`vision_cutoff_above_top_mm`·`descend_speed_mps`·`lift_speed_mps`·`height_tol_mm` | null |
+| `z.*` | `approach_above_top_mm`·`lift_above_top_mm`·`vision_cutoff_above_top_mm`(제안 30, U9-a)·`descend_speed_mps`·`lift_speed_mps`·`height_tol_mm` | null |
+| | `profile` `p` | 선택 키(없거나 null 이면 p). `trapezoid` 는 DESCEND·LIFT 만 사다리꼴(S2-T14) — 기본 p 면 `params_sha256` 그대로 |
 | `input.*` | `stale_timeout_s`·`lost_timeout_s`·`pose_extrap_max_ms`·`blind_entry_max_age_s` | null |
 | | `pose_lag_ms` 60.0 | 측정값, gateway `pose_source: service` 기준 |
-| 기타 | `retry.max_attempts` 1 · `stop_timeout_s` 1.0 · `gripper_timeout_s` 3.0 · `rate_hz` 30.0 · `zero_hold_s` 0.5 · `log.dir` `data/servo` | 계약(30 Hz)·제안값. 재시도 3회는 U9 |
+| 기타 | `retry.max_attempts` 1 · `stop_timeout_s` 1.0 · `gripper_timeout_s` 4.0 · `rate_hz` 30.0 · `zero_hold_s` 0.5 · `log.dir` `data/servo` | 계약(30 Hz)·제안값. `max_attempts` 는 1~3 허용, 현장 정렬 x 에서는 x 여유가 없어 1 유지(U9b-dd 1절). `gripper_timeout_s` 4.0 은 비스듬한 박스 닫힘 3.08 s(10/12) 때문의 임시값(S2-T29, 새 레포 #33) |
 
 - **null = 미측정.** launch 는 null 키를 넘기지 않고, 노드는 필수 키가 비면 READY 를 거부한다(`--params-file` 로 직접 넘겨 문자열 `"null"` 이 와도 미측정으로 본다). 모르는 값으로 움직이지 않는 것이 정상 동작이다.
 - `input.pose_lag_ms` 는 gateway `pose_source` 와 짝이다. G0 런북 T7 은 `joint_states` 면 0, `service` 면 60 을 쓴다([g0-runbook.md](../../docs/g0-runbook.md) T7, measurements-1010 #10). 기본 파일은 아직 60 이다.
@@ -195,17 +220,18 @@ cd ~/voss_ws/src/rokey_cobot2_VOSS && ruff check src/voss_servo && ruff format -
 
 ### 7.2 개인 PC — sim (로봇 없음)
 
-`sim_check` 가 case 마다 `sim.launch.py`(fake_box + robot_gateway `dry_run:=true` 고정 + belt_servo)를 새로 띄우고 goal 1개를 보낸 뒤 판정한다. 레포 루트에서 실행한다.
+`sim_check` 가 case 마다 `sim.launch.py`(fake_box + robot_gateway `dry_run:=true` 고정 + belt_servo, 필요하면 fake_gripper)를 새로 띄우고 goal 1개를 보낸 뒤 판정한다. 빌드는 워크스페이스에서 한다(레포 루트에서 `colcon build` 를 하면 레포 안에 build/install 이 생긴다).
 
 ```bash
-colcon build --symlink-install --packages-select voss_msgs voss_servo voss_robot
+cd ~/voss_ws && colcon build --symlink-install --packages-up-to voss_servo && source install/setup.bash
+export ROS_DOMAIN_ID=<개인 번호>                                                      # 30(공용 PC)이면 J0 에서 거부
 ros2 run voss_servo sim_check --case all --out /tmp/voss_sim/run1                    # pre_u5 프로필
-ros2 run voss_servo sim_check --profile grasp --case all --out /tmp/voss_sim/run2    # 파지까지
+ros2 run voss_servo sim_check --profile grasp --case all --out /tmp/voss_sim/run2    # 파지·후퇴·재시도까지
 ```
 
-- 인자: `--case lost|invalid|cancel|normal|two_boxes|empty|all` · `--profile pre_u5|grasp` · `--kp` · `--goal-timeout-s` · `--cancel-after-s` · `--config`.
-- 종료 코드: `0` 전부 통과 · `1` 불일치 · `2` 판정 불가. 사전 점검(J0)은 `ROS_DOMAIN_ID=30` 이거나 gateway·belt_servo·fake_box 가 이미 떠 있으면 아무것도 띄우지 않고 2 로 끝난다.
-- 단계별로 손으로 볼 때는 `sim.launch.py` + `ros2 action send_goal` — 절차와 주의(goal 은 launch 뒤 5 s 안에)는 [design/U3-run.md](design/U3-run.md) B.5.
+- 인자: `--case lost|invalid|cancel|normal|two_boxes|empty|descend_lost|vanish|retry|fail_retreat|wide|all` · `--profile pre_u5|grasp`(pre_u5 = lost·invalid·cancel·normal·two_boxes, grasp = normal·empty·cancel·descend_lost·vanish·retry·fail_retreat·wide) · `--z-profile p|trapezoid` · `--kp` · `--goal-timeout-s` · `--cancel-after-s` · `--config` · `--out`.
+- 종료 코드: `0` 전부 통과 · `1` 불일치 · `2` 판정 불가. 사전 점검(J0)은 `ROS_DOMAIN_ID=30` 이거나 gateway·belt_servo·fake_box·fake_gripper 가 이미 떠 있으면 아무것도 띄우지 않고 2 로 끝난다.
+- 단계별로 손으로 볼 때는 `sim.launch.py` + `ros2 action send_goal` — 절차와 주의(goal 은 launch 뒤 5 s 안에)는 [design/U3-run.md](design/U3-run.md) B.5. `sim.launch.py` 인자: `config`(필수) · `scenario` · `object_mm` · `kp` · `log_dir` · `invalid_after_s` · `lost_after_s` · `gripper:=gateway|fake`(fake 면 fake_gripper 를 띄우고 `/voss/robot/gripper` 를 `/voss/sim/gripper` 로 돌린다) · `grip_plan`(예 `empty,held`) · `grip_close_s` · `max_attempts` · `box_start_x_mm` · `z_profile`.
 
 ### 7.3 공용 PC — 실기 (G0 런북 T7)
 
@@ -225,7 +251,7 @@ ros2 launch voss_servo belt_servo.launch.py params:=~/voss_ws/config/belt_servo_
 | `pose_lag_ms=…` 줄 | gateway `pose_source` 와 맞음(service → 60, joint_states → 0) |
 | `ros2 action list` | `/voss/servo/track_and_grasp` 보임 |
 
-`READY 거부: missing=[…]` 는 그 키가 null, `invalid=[…]` 는 교차 검사 실패다. 끌 때는 **gateway 보다 먼저** belt_servo 를 Ctrl+C 로 끈다(런북 183행 순서).
+`READY 거부: missing=[…]` 는 그 키가 null, `invalid=[…]` 는 교차 검사 실패다. 끌 때는 **gateway 보다 먼저** belt_servo 를 Ctrl+C 로 끈다(런북 "7. 끝나면" 절).
 
 ### 7.4 로그와 게이트 집계
 
@@ -244,19 +270,24 @@ ros2 run voss_servo gate_summary data/servo --since <시각> --series s1 --ticks
 
 원인 열은 비워 두고 사람이 영상·로그로 채운다. 자세히: [design/U6-run.md](design/U6-run.md), 판정 기준: [g1-gate.md](../../docs/g1-gate.md).
 
+z 프로파일(p vs trapezoid)을 비교할 때는 `ros2 run voss_servo z_compare <log.dir>/attempts --ticks <log.dir>/ticks` — 절차는 [design/S2T14-run.md](design/S2T14-run.md).
+
 ## 8. 수정·확장 가이드
 
 | 바꾸려는 것 | 고칠 곳 | 같이 고칠 테스트·문서 |
 |---|---|---|
 | 속도 계산(예측·FF+P·clamp·Z) | `control.py` | `test_control.py`, design/U2-* |
 | 단계 전이·reason 조건 | `fsm.py` | `test_fsm.py`(전이표 번호), design/U1-dd.md 2절 |
+| 안전 후퇴·재시도 조건 | `fsm.py` `_retreat`·`_not_held`, `control.retreat_xy`·`retry_room_ok` | `test_fsm.py`·`test_control.py`(U9b), `test_sim_check.py`, design/U9b-* |
+| z 프로파일·시간 상한 | `control.py` `z_law`·`z_speed_trap`·`z_move_time_s` | `test_z_profile.py`, `test_race.py`, design/S2T14-* |
+| 진단 로그·LOST 원인 | `diagnose.py` → `belt_servo.py` `_refine_lost` | `test_diagnose.py`, design/U9c-* |
 | 그리퍼 판정·재요청·x 여유 | `grip.py`, `fsm.judge_grip` | `test_grip.py`, `test_action_e2e.py` |
 | 파라미터 추가 | `params.py` `PARAM_SPECS`(검사 포함) → `config/belt_servo.yaml`·`belt_servo_real.yaml.example`·`belt_servo_sim.yaml` 세 곳 | `test_params.py`, `test_launch_params.py` T-L12 |
 | 로그 필드 | `log_schema.py` (시도 키는 틱 키의 부분집합 유지) → `gate_summary.py` 읽는 쪽 | `test_log_schema.py`, `test_gate_summary.py` |
-| 새 sim 시나리오 | `fake_box.py` `SCENARIOS` → `sim.launch.py` 인자 → `sim_check.py` 기대값 | `test_fake_box.py`, `test_sim_check.py` |
+| 새 sim 시나리오 | `fake_box.py` `SCENARIOS`(그리퍼 응답은 `fake_gripper.py`) → `sim.launch.py` 인자 → `sim_check.py` 기대값 | `test_fake_box.py`, `test_fake_gripper.py`, `test_sim_check.py` |
 
-- **설계 흐름:** 단위 하나마다 HLD → DD → pseudo → code 순서로 `design/U<n>-{hld,dd,pseudo}.md` 를 먼저 쓰고 승인받는다. 결정 이유가 바뀌면 [DESIGN.md](DESIGN.md) 해당 카드를 갱신한다.
-- **PR:** 브랜치 `<type>/<이슈>-voss_servo-<설명>`, 리뷰어 김학민(CODEOWNERS). 토픽·메시지 필드·액션·`voss_config.yaml` 을 바꾸면 코드보다 먼저 `docs/interfaces/` 를 고치고 `interface` 라벨(규칙 2). 실측값은 measurements 문서에만.
+- **설계 흐름:** 단위 하나마다 HLD → DD → pseudo → code 순서로 `design/<단위>-{hld,dd,pseudo}.md`(예 `U9b-*`, `S2T14-*`) 를 먼저 쓰고 승인받는다. 결정 이유가 바뀌면 [DESIGN.md](DESIGN.md) 해당 카드를 갱신한다.
+- **PR:** 브랜치 `<type>/<작업 ID>-voss_servo-<설명>`(새 레포는 작업 ID 를 직접 쓴다, 예 `fix/S2-T29-voss_servo-…`, ADR-0015), 리뷰어 김학민(CODEOWNERS). 토픽·메시지 필드·액션·`voss_config.yaml` 을 바꾸면 코드보다 먼저 `docs/interfaces/` 를 고치고 `interface` 라벨(규칙 2). 실측값은 measurements 문서에만.
 - **금지:** `/dsr01/...`·RG2 직접 호출(규칙 3) · `voss_config.yaml` 직접 읽기(규칙 5) · D435i 깊이 사용(규칙 4) · 실로봇 명령의 자동 실행(규칙 6) · 실값 파일·로그 이외 데이터 커밋(규칙 8).
 
 ## 9. 관련 문서
@@ -265,16 +296,20 @@ ros2 run voss_servo gate_summary data/servo --since <시각> --series s1 --ticks
 |---|---|
 | [DESIGN.md](DESIGN.md) | 결정 카드 18개, 우선순위(§4), 미확정 경계(§9) |
 | [design/U1-hld.md](design/U1-hld.md) · [U2-hld.md](design/U2-hld.md) · [U3-hld.md](design/U3-hld.md) · [U5-hld.md](design/U5-hld.md) | 뼈대 · 제어 · launch/sim · 파지 설계 (각 DD·pseudo 동봉) |
-| [design/U3-run.md](design/U3-run.md) · [design/U6-run.md](design/U6-run.md) | 실기 기동·sim 절차 · 게이트 집계 사용법 |
+| [design/U9a-hld.md](design/U9a-hld.md) · [U9b-hld.md](design/U9b-hld.md) · [U9c-hld.md](design/U9c-hld.md) | 하강 LOST 경주 · 안전 후퇴·재시도 · 값·cause·진단 로그 (T28, 각 DD·pseudo 동봉) |
+| [design/S2T14-hld.md](design/S2T14-hld.md) · [design/U-E-hld.md](design/U-E-hld.md) | 사다리꼴 z 프로파일 · 두산 에뮬레이터 전 구간 가상 시험 |
+| [design/U3-run.md](design/U3-run.md) · [U6-run.md](design/U6-run.md) · [U9-run.md](design/U9-run.md) · [S2T14-run.md](design/S2T14-run.md) · [U-E-run.md](design/U-E-run.md) | 실기 기동·sim 절차 · 게이트 집계 · 10/12 U9 실기 · z 프로파일 실기 · 에뮬레이터 실행 |
+| [design/FIELD-1010-analysis.md](design/FIELD-1010-analysis.md) | 10/10 실기 결과 분석(LOST 경주·x 여유·T28 입력) |
 | [docs/interfaces/topics.md](../../docs/interfaces/topics.md) · [voss_msgs.md](../../docs/interfaces/voss_msgs.md) | 토픽·액션 계약 |
-| [ADR-0009](../../docs/adr/0009-grasp-31mm-width.md) · [ADR-0010](../../docs/adr/0010-doosan-servo-command-path.md) · [ADR-0012](../../docs/adr/0012-numeric-targets-approved.md) · [ADR-0002](../../docs/adr/0002-grasp-method-gate.md) | 31 mm 폭 파지 · 두산 서보 경로(speedl_stream) · 수치 목표 · 게이트 |
-| [measurements-1006](../../docs/measurements-1006.md) · [1008](../../docs/measurements-1008.md) · [1010](../../docs/measurements-1010.md) | 실측값 |
+| [ADR-0009](../../docs/adr/0009-grasp-31mm-width.md) · [ADR-0010](../../docs/adr/0010-doosan-servo-command-path.md) · [ADR-0012](../../docs/adr/0012-numeric-targets-approved.md) · [ADR-0002](../../docs/adr/0002-grasp-method-gate.md) · [ADR-0015](../../docs/adr/0015-repo-migration.md) | 31 mm 폭 파지 · 두산 서보 경로(speedl_stream) · 수치 목표 · 게이트 · 레포 이전(번호·브랜치 규칙) |
+| [measurements-1006](../../docs/measurements-1006.md) · [1008](../../docs/measurements-1008.md) · [1010](../../docs/measurements-1010.md) · [1012](../../docs/measurements-1012.md) | 실측값 |
 | [g0-runbook.md](../../docs/g0-runbook.md) · [g1-gate.md](../../docs/g1-gate.md) | 현장 기동 순서 · 게이트 절차 |
 
 ## 10. 알려진 한계·후속
 
-- **재시도 동작은 U9(T28 #37).** 지금 `retry.max_attempts` 는 1 이라 GRASP_FAILED 가 첫 실패에서 바로 난다. 계약상 최대 3회.
-- **x ≥ 600 z 처짐:** TRACK z 목표 140.8 에서 x 618 → 136.5 로 2/2 재현(measurements-1010 #13). 원인 조사 중.
-- **사각 진입 전 LOST:** G1 의도 시험의 LOST 3회는 시야가 윗면 +31~37 mm 에서 끊긴 뒤 사각(`vision_cutoff_above_top_mm`) 진입 전에 `lost_timeout_s` 가 먼저 지났다(measurements-1010 의도 시험 절). 분석 중.
-- `input.pose_lag_ms` 기본 파일·example 은 60 이고, `joint_states` 기준 값(0)은 시험값이다 — 반영은 후속. `grasp.hold_width_max_mm` 도 기본 43.5 이지만 10/10 현장은 44.0 을 썼다(measurements-1010 #10) — 기본값 갱신 후속.
-- 미정값: Kp·안전 한계·단계 전환 값은 제안값만 있고, 48 mm/s 에서의 `acc`·watchdog 초과 거리, belt_servo READY 상태 토픽은 미확정이다(DESIGN.md §9).
+- **해결됨(10/13 main):** 재시도·안전 후퇴(U9-b, 재시도는 x 여유 안에서만 · `max_attempts` 1 유지), x ≥ 600 z 처짐(x_max 550), 사각 진입 전 LOST 경주(U9-a cutoff 30 + 사각 체류 상한), 쥔 폭 상한 44.0(U-F).
+- `input.pose_lag_ms` 기본 파일·example 은 60(gateway `pose_source: service` 기준)이고, `joint_states` 기준 값 0 은 시험값이다 — 반영은 후속.
+- **재시도는 실기 미검증:** 현장 정렬 x 에서는 x 여유가 없어 재시도가 일어나지 않는다. sim `retry` 는 가짜 닫힘 0.5 s 에서만 통과한다(`sim_check.py` retry 케이스 주석, S2-T29).
+- **저고도 종료의 후퇴:** `DESCEND_BLIND_TIMEOUT`, DESCEND·GRASP 중 `OUT_OF_REACH` 는 후퇴하지 않고 그 자리에서 0 유지 뒤 watchdog 정지(DESIGN.md §9, U9b-hld 8절).
+- `gripper_timeout_s` 4.0 은 임시값 — J6 회전 파지(S2-T18) 뒤 3.0 재검토.
+- 미정값: Kp·안전 한계·단계 전환 값은 제안값만 있고, 48 mm/s 에서의 `acc`, belt_servo READY 상태 토픽은 미확정이다(DESIGN.md §9). watchdog 초과 거리는 10/10 에 쟀다(48 mm/s 약 0.25 s · 10.3 mm, measurements-1010 #12).

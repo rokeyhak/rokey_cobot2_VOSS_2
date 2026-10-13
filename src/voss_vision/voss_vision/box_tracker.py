@@ -49,7 +49,8 @@ QOS_POSE = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 QOS_IMAGE = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 SEG_KEYS = ("downscale", "v_min", "s_max", "close_px", "area_min", "area_max", "aspect_tol",
-            "fill_min", "border_px", "belt_green_frac", "belt_margin_px")  # fmt: skip
+            "fill_min", "border_px", "belt_green_frac", "belt_margin_px", "belt_roi",
+            "belt_min_area_frac")  # fmt: skip
 HOMO_HE_WARN_MM = 3.0  # 관측 자세에서 두 방식 차이가 이보다 크면 경고 (calibration.md)
 SRC_NAME = {
     BoxTrack.SOURCE_NONE: "none",

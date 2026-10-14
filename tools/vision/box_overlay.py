@@ -11,7 +11,8 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
 실시간 — 공용 PC, 10/11 통합부터. 게이트 측정 중에는 띄우지 않는다(영상 구독이 하나 더 붙어 부하가 는다):
   python3 tools/vision/box_overlay.py --live [--candidates] [--hz 10] [--out live.mp4]
 
-화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `box<track_id> <채움 %>`(+ OCR 결과), 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `BOX<번호> <채움 %>`(+ OCR 결과). 번호 = sort_manager box_id 끝 순번
+(`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 `BOX-`, 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
 채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
 학습 모델의 신뢰도가 아니라 seg 판정값이다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
@@ -39,6 +40,7 @@ T_BOX = "/voss/vision/box"
 T_LABEL = "/voss/vision/label"
 T_POSE = "/voss/robot/pose"
 T_STATE = "/voss/sort/state"
+T_RESULT = "/voss/sort/result"
 T_FB = "/voss/servo/track_and_grasp/_action/feedback"
 IMG_TOPICS = ("/camera/color/image_raw/compressed", "/camera/color/image_raw")
 
@@ -88,6 +90,18 @@ def match_candidate(t, cands) -> Candidate | None:
     return best
 
 
+def box_seq(box_id: str) -> int | None:
+    """sort_manager box_id `<session_id>-<3자리 순번>` → 순번(int). 형식이 아니면 None."""
+    tail = box_id.rsplit("-", 1)[-1] if box_id else ""
+    return int(tail) if tail.isdigit() else None
+
+
+def box_label(track_id: int, box_no: dict[int, int] | None) -> str:
+    """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX-."""
+    n = (box_no or {}).get(track_id)
+    return f"BOX{n}" if n is not None else "BOX-"
+
+
 def yaw_text(t) -> str | None:
     """BoxTrack yaw(S2-T16 v15 필드) → 'yaw +45.0°'. 필드가 없거나 무효면 None."""
     if not getattr(t, "yaw_valid", False):
@@ -122,9 +136,18 @@ class Painter:
         self.font_px = font_px
 
     def render(
-        self, bgr, cands, p: SegParams, tracks, labels, header: list[str], score_cands=None
+        self,
+        bgr,
+        cands,
+        p: SegParams,
+        tracks,
+        labels,
+        header: list[str],
+        score_cands=None,
+        box_no: dict[int, int] | None = None,
     ) -> np.ndarray:
-        """score_cands: 채움 %·긴 축을 찾을 후보(기본 = cands). 실시간에서 후보는 그리지 않고 % 만 볼 때 따로 준다."""
+        """score_cands: 채움 %·긴 축을 찾을 후보(기본 = cands). 실시간에서 후보는 그리지 않고 % 만 볼 때 따로 준다.
+        box_no: track_id → sort_manager 순번(SortState·SortResult 의 box_id 끝 3자리)."""
         s = self.scale
         img = (
             cv2.resize(bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
@@ -166,9 +189,8 @@ class Painter:
                 img, (int(x * s), int(y * s)), (int((x + w) * s), int((y + h) * s)), TRACK, 2
             )
             c = match_candidate(t, cands if score_cands is None else score_cands)
-            line = (
-                f"box{t.track_id} {c.fill * 100:.0f}%" if c is not None else f"box{t.track_id} -%"
-            )
+            pct = f"{c.fill * 100:.0f}%" if c is not None else "-%"
+            line = f"{box_label(t.track_id, box_no)} {pct}"
             if not t.position_valid:
                 line += " 무효"
             lab = labels.get(t.track_id)
@@ -270,7 +292,7 @@ def read_side(bag: Path):
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
 
-    side = [T_BOX, T_LABEL, T_POSE, T_STATE, T_FB]
+    side = [T_BOX, T_LABEL, T_POSE, T_STATE, T_RESULT, T_FB]
     r, types = open_reader(bag, side)
     missing = [t for t in (T_BOX, T_POSE, T_FB) if t not in types]
     if missing:
@@ -278,10 +300,18 @@ def read_side(bag: Path):
     cls = {t: get_message(types[t]) for t in side if t in types}
     boxes: dict[int, list] = {}
     labels, state, phase = Series(), Series(), Series()
+    numbering = Series()  # (track_id, sort_manager 순번) — 그 시각부터 화면에 쓴다
     pose_t, pose_z = [], []
+    bad: dict[
+        str, int
+    ] = {}  # 설치된 voss_msgs 와 정의가 다른 옛 녹화(예: 10/12 SortResult) — 건너뛴다
     while cls and r.has_next():  # 하나도 없으면 필터가 비어 영상까지 읽으므로 건너뛴다
         topic, data, t_recv = r.read_next()
-        m = deserialize_message(data, cls[topic])
+        try:
+            m = deserialize_message(data, cls[topic])
+        except Exception:  # rclpy 는 RMWError 를 낸다
+            bad[topic] = bad.get(topic, 0) + 1
+            continue
         if topic == T_BOX:
             boxes.setdefault(ns(m.stamp), []).append(m)
         elif topic == T_LABEL:
@@ -289,14 +319,21 @@ def read_side(bag: Path):
         elif topic == T_POSE:
             pose_t.append(ns(m.header.stamp))
             pose_z.append(m.pose.position.z * 1000.0)
-        elif topic == T_STATE:
-            state.add(t_recv, (m.state, m.track_id))
+        elif topic in (T_STATE, T_RESULT):
+            if topic == T_STATE:
+                state.add(t_recv, (m.state, m.track_id))
+            seq = box_seq(m.box_id)
+            if seq is not None and m.track_id >= 0:
+                numbering.add(t_recv, (m.track_id, seq))
         elif topic == T_FB:
             phase.add(t_recv, m.feedback.phase)
-    for s in (labels, state, phase):
+    for t, n in bad.items():
+        print(f"⚠ {t} {n}건 못 읽음(설치된 voss_msgs 와 녹화 당시 정의가 다름) — 그 칸은 비워 둔다")
+    for s in (labels, state, phase, numbering):
         s.sort()
     order = np.argsort(pose_t)
-    return boxes, labels, state, phase, np.asarray(pose_t)[order], np.asarray(pose_z)[order]
+    pose = (np.asarray(pose_t)[order], np.asarray(pose_z)[order])
+    return boxes, labels, state, phase, numbering, *pose
 
 
 def latest_labels(labels: Series, t: int) -> dict:
@@ -313,7 +350,9 @@ def run_bag(args, p: SegParams, plane_z: float) -> None:
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
 
-    boxes, labels, state, phase, pose_t, pose_z = read_side(args.bag)
+    boxes, labels, state, phase, numbering, pose_t, pose_z = read_side(args.bag)
+    box_no: dict[int, int] = {}  # 이 프레임까지 받은 track_id → sort_manager 순번
+    n_num = 0
     _, types = open_reader(args.bag)
     img_topic = args.image_topic or next((t for t in IMG_TOPICS if t in types), None)
     if img_topic is None:
@@ -377,7 +416,13 @@ def run_bag(args, p: SegParams, plane_z: float) -> None:
             f"TCP 윗면 {h_txt}   발행 {sorted(ids) or '없음'}",
             f"후보: {count_text(count)}   가장 큰 후보 아래끝 v {bottom_v if bottom_v is not None else '-'} / {bgr.shape[0]}",
         ]
-        out = painter.render(bgr, cands, p, tracks, latest_labels(labels, t_recv), header)
+        while n_num < len(numbering.t) and numbering.t[n_num] <= t_recv:
+            tid, seq = numbering.v[n_num]
+            box_no[tid] = seq
+            n_num += 1
+        out = painter.render(
+            bgr, cands, p, tracks, latest_labels(labels, t_recv), header, box_no=box_no
+        )
         if args.out:
             if writer is None:
                 writer = cv2.VideoWriter(str(args.out), cv2.VideoWriter_fourcc(*"mp4v"), 30.0,
@@ -421,7 +466,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
     from sensor_msgs.msg import CompressedImage, Image
 
     from voss_msgs.action import TrackAndGrasp
-    from voss_msgs.msg import BoxTrack, LabelRead, SortState
+    from voss_msgs.msg import BoxTrack, LabelRead, SortResult, SortState
 
     # best_effort 구독은 reliable 발행자와도 맞는다
     be = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -435,6 +480,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.boxes: dict[int, list] = {}
             self.last_box_t = 0
             self.labels: dict[int, LabelRead] = {}
+            self.box_no: dict[int, int] = {}  # track_id → sort_manager 순번
             self.pose_z = None
             self.state = ("-", -1)
             self.phase = ("-", 0.0)
@@ -450,8 +496,8 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             )
             self.create_subscription(PoseStamped, T_POSE,
                                      lambda m: setattr(self, "pose_z", m.pose.position.z * 1000.0), be)  # fmt: skip
-            self.create_subscription(SortState, T_STATE,
-                                     lambda m: setattr(self, "state", (m.state, m.track_id)), be)  # fmt: skip
+            self.create_subscription(SortState, T_STATE, self.on_state, be)
+            self.create_subscription(SortResult, T_RESULT, self.on_numbered, be)
             self.create_subscription(TrackAndGrasp.Impl.FeedbackMessage, T_FB,
                                      lambda m: setattr(self, "phase", (m.feedback.phase, time.monotonic())), be)  # fmt: skip
             self.create_timer(1.0 / args.hz, self.tick)
@@ -459,6 +505,16 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                 f"{topic} 구독, {args.hz} Hz 그리기, 후보 {'표시' if args.candidates else '끔'}, "
                 f"채움 % {'끔' if args.no_score and not args.candidates else '표시'} — q 로 끝"
             )
+
+        def on_numbered(self, m) -> None:
+            """SortState·SortResult 의 box_id 끝 순번을 그 track_id 에 붙인다(sort_manager 와 같은 번호)."""
+            seq = box_seq(m.box_id)
+            if seq is not None and m.track_id >= 0:
+                self.box_no[m.track_id] = seq
+
+        def on_state(self, m: SortState) -> None:
+            self.state = (m.state, m.track_id)
+            self.on_numbered(m)
 
         def on_box(self, m: BoxTrack) -> None:
             t = ns(m.stamp)
@@ -492,7 +548,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                 ),
             ]
             out = self.painter.render(
-                bgr, cands, p, tracks, self.labels, header, score_cands=scored
+                bgr, cands, p, tracks, self.labels, header, score_cands=scored, box_no=self.box_no
             )
             if args.out:
                 if self.writer is None:

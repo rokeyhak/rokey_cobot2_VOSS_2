@@ -84,6 +84,10 @@ ADR-0006 기준. 브라우저는 Nginx(80) 하나로 들어오고 `/` → React,
   - `palletize` — `args` 는 `{"route": [...]}` 키 하나. `route` = 문자열 배열 1~3개·중복 없음·빈 문자열 없음(배송 순서, 첫 배송지부터). 형식이 틀리면 `400 INVALID_QUERY`, zone_map 정식 동 이름이 아니면(별칭 포함) `400 UNKNOWN_DONG`. MQTT `voss/command` 에는 `args` 를 그대로 싣는다(쉼표 문자열로 바꾸는 것은 hmi_bridge, mqtt.md). 시작 조건(처리 중 박스 없음·팔레트 칸 0·교시)은 manager 가 보고 `command_ack` 로 거부한다.
   - `reset_zone` — `zone` 에 `PALLET` 추가(A/B/C/RECHECK/HOLD/PALLET).
 
+### `POST /api/voice/announce` — 로컬 HMI 버튼 음성 안내
+
+`{"action":"start|stop|resume|priority|answer|reset_zone|palletize|plan"}` 하나만 받는다. 로컬 Nginx의 `X-Real-IP`가 `127.0.0.1` 또는 `::1`일 때만 `202`와 `request_id`를 반환하고, 고정 문구 코드만 MQTT `voss/voice/request`로 보낸다. 브리지가 `/voss/voice/say`로 전달하고 Nodes PC의 `speech_out`이 재생한다. 응답은 MQTT 전송 접수이며 실제 스피커 출력이나 로봇 동작 완료를 보장하지 않는다.
+
 ### `GET /api/stream` — SSE (React 실시간 갱신)
 | event | data | 원천 |
 |---|---|---|

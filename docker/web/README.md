@@ -113,6 +113,12 @@ ros2 run voss_vision camera_preview
 
 Web PC의 개발 서버(`npm run dev`)는 `/camera/gripper/frame.jpg`를 로컬 `127.0.0.1:8091`로 전달합니다. 따라서 개발 서버를 실행하는 PC에서 송출 노드의 `127.0.0.1:8091`에 닿아야 합니다. 카메라 메뉴의 **그리퍼 카메라 → 영상 연결**을 누르면 프레임을 요청합니다. 송출 노드가 실행되지 않았거나 입력 영상이 없으면 OFFLINE으로 표시됩니다. 배포 Nginx의 이 경로는 로컬 접속만 허용합니다.
 
+### 제어 버튼 음성 안내 (Nodes PC)
+
+로컬 HMI의 시작·정지·재개·우선 분류·답변·구역 초기화·팔레트 적재·계획 저장이 API에 접수되면 Web 백엔드가 `voss/voice/request`를 보냅니다. Nodes PC의 일반 `hmi_bridge`가 이를 검증해 고정 문구를 `/voss/voice/say`로 발행하고 `speech_out`이 재생합니다. `hmi_bridge voice_status_only:=true`는 이 요청을 받지 않습니다. TTS 문구의 "전달"은 로봇 동작 완료가 아닙니다.
+
+적용하려면 Web 이미지를 재빌드하고, MQTT ACL 템플릿 `docker/mqtt/acl`의 새 read/write 규칙을 실제 `docker/mqtt/secrets/acl`에 반영한 뒤 브로커를 재시작합니다. Nodes PC에서는 `voss_hmi`를 빌드하고 일반 `hmi_bridge`와 `speech_out`을 재시작합니다. `speech_out`에는 기존 Nodes PC의 `127.0.0.1:8000` AI TTS 경로가 필요합니다.
+
 ### 실제 음성 인식과 마이크 표시등
 
 `voice_listener` 및 `hmi_bridge`의 변경과 MQTT ACL, Spring 백엔드 변경을 함께 반영해야 한다. 호출어가 인식되면 노랑, 뒤의 전사 텍스트가 수락되면 초록, 대기 시간 초과/전사 실패는 빨강이다. 초록은 로봇 동작 완료를 의미하지 않는다. 표시 전용 시험 모드(`hmi_bridge voice_status_only:=true`, `voice_listener publish_transcript:=false`)는 `voice_preview` MQTT 계정을 쓰며 일반 bridge 계정은 그대로다(docker/mqtt/README.md). Web PC 에서 쓰던 실행기 `voice_logo_local.py` 는 레포에 없다. 전체 계약은 [voice_status.md](../../docs/interfaces/voice_status.md), 빌드·적용·구간별 확인은 [시험 및 실행 안내](../../docs/testing/voice_web_link.md)를 참고한다.

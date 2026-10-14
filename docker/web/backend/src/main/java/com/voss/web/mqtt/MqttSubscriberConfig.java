@@ -99,4 +99,20 @@ public class MqttSubscriberConfig {
         handler.setAsync(false);
         return handler;
     }
+
+    /** 버튼 음성 요청은 로봇 명령과 별도 토픽으로 보낸다. */
+    @Bean
+    public MessageChannel mqttVoiceChannel() { return new DirectChannel(); }
+
+    @Bean
+    @ServiceActivator(inputChannel = "mqttVoiceChannel")
+    public MessageHandler mqttVoiceConsumer(MqttPahoClientFactory clientFactory) {
+        MqttPahoMessageHandler handler = new MqttPahoMessageHandler(
+                "voss-web-voice-" + UUID.randomUUID(), clientFactory);
+        handler.setDefaultTopic("voss/voice/request");
+        handler.setDefaultQos(1);
+        handler.setDefaultRetained(false);
+        handler.setAsync(false);
+        return handler;
+    }
 }

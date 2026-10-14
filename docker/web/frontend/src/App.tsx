@@ -4,7 +4,7 @@
 // 근거: docs/interfaces/web_api.md, mqtt.md, ADR-0006. Sprint 2 S2-T08 팔레트 패널은 PalletPanel.tsx.
 import { flushSync } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getResults, getSummary, issueCommand, putPlan, RequestFailure } from './api';
+import { announceVoice, getResults, getSummary, issueCommand, putPlan, RequestFailure } from './api';
 import type { CommandArgs } from './api';
 import PalletPanel from './PalletPanel';
 import { emptyPallet, GENERAL_RESET_ZONES, parsePalletState } from './pallet';
@@ -53,6 +53,7 @@ export default function App() {
   const [held,setHeld] = useState<SortResult[]>([]);
   const [activePage,setActivePage] = useState<'dashboard'|'cameras'>('dashboard');
   const [notice,setNotice] = useState(INITIAL_ERROR);
+  const [voiceNotice,setVoiceNotice] = useState('');
   const [error,setError] = useState('');
   const [plannedText,setPlannedText] = useState('10');
   const editingPlan = useRef(false);
@@ -245,11 +246,17 @@ export default function App() {
     return ()=>{window.clearInterval(polling);window.clearInterval(ticking);};
   },[refresh]);
   /** 안전 제한을 서버에서도 검사하며 202를 작업 완료로 표시하지 않는다. */
+  function requestButtonVoice(action:CommandType|'plan') {
+    if (!isLocal) return;
+    setVoiceNotice('');
+    void announceVoice(action).catch(failure=>setVoiceNotice(`Nodes PC 음성 안내 요청 실패: ${errorText(failure)}`));
+  }
   async function command(type:CommandType,args:CommandArgs={}) {
     setBusy(true);setNotice('명령 전달을 요청하는 중입니다.');
     try {
       const accepted=await issueCommand(type,args);
       setNotice(`${type} · MQTT 전달 요청 수락(202) · ${accepted.command_id.slice(0,8)}… / 실제 접수·완료는 별도 확인`);
+      requestButtonVoice(type);
     } catch(failure) {setNotice(errorText(failure));}
     finally {setBusy(false);}
   }
@@ -264,7 +271,7 @@ export default function App() {
     const parsed=Number(plannedText);
     if (!Number.isInteger(parsed)||parsed<1||parsed>100) {setNotice('planned는 1~100 정수여야 합니다.');return;}
     setBusy(true);
-    try {const next=await putPlan(parsed);setSummary(next);editingPlan.current=false;setNotice(`투입 예정 수량을 ${parsed}개로 저장했습니다.`);}
+    try {const next=await putPlan(parsed);setSummary(next);editingPlan.current=false;setNotice(`투입 예정 수량을 ${parsed}개로 저장했습니다.`);requestButtonVoice('plan');}
     catch(failure) {setNotice(errorText(failure));}
     finally {setBusy(false);}
   }
@@ -305,6 +312,7 @@ export default function App() {
             <div className="form-grid"><div className="field"><label htmlFor="planned">투입 예정 수량</label><div className="inline-input"><div className="plan-stepper"><button type="button" aria-label="투입 예정 수량 1개 줄이기" disabled={busy||Number(plannedText)<=1} onClick={()=>stepPlan(-1)}>−</button><input id="planned" type="number" min="1" max="100" step="1" value={plannedText} onChange={event=>{setPlannedText(event.target.value);editingPlan.current=true;}}/><button type="button" aria-label="투입 예정 수량 1개 늘리기" disabled={busy||Number(plannedText)>=100} onClick={()=>stepPlan(1)}>+</button></div><button disabled={busy} onClick={()=>void savePlan()}>저장</button></div></div><div className="field"><label htmlFor="priority">동별 우선 분류</label><div className="inline-input"><select id="priority" value={selectedDong} onChange={event=>setSelectedDong(event.target.value)}><option value="">동 선택</option>{dongs.map(dong=><option key={dong} value={dong}>{dong}</option>)}</select><button disabled={!controlEnabled||!selectedDong} onClick={()=>void command('priority',{dong:selectedDong})}>적용</button></div></div></div>
             <div className="form-grid"><div className="field"><label htmlFor="answer">작업자 답변 · 질문 박스 {state?.box_id||'없음'}</label><div className="inline-input"><select id="answer" value={answerDong} disabled={answerHold} onChange={event=>setAnswerDong(event.target.value)}><option value="">동 선택</option>{dongs.map(dong=><option key={dong} value={dong}>{dong}</option>)}</select><button disabled={!controlEnabled||displayState!=='ASKING'||!state?.box_id||(!answerHold&&!answerDong)} onClick={()=>void command('answer',answerHold?{box_id:state?.box_id??'',zone:'HOLD'}:{box_id:state?.box_id??'',dong:answerDong})}>답변</button></div><label className="checkbox"><input type="checkbox" checked={answerHold} onChange={event=>setAnswerHold(event.target.checked)}/> HOLD로 보류</label></div><div className="field"><label htmlFor="zone">구역 초기화</label><div className="inline-input"><select id="zone" value={selectedZone} onChange={event=>setSelectedZone(event.target.value)}>{RESET_ZONES.map(zone=><option key={zone}>{zone}</option>)}</select><button disabled={!controlEnabled} onClick={()=>void command('reset_zone',{zone:selectedZone})}>초기화</button></div></div></div>
             <p className="inline-notice" role="status">{notice}</p>
+            {voiceNotice && <p className="inline-notice" role="alert">{voiceNotice}</p>}
             {state?.pending_question&&<p className="question">질문 대기 · {state.pending_question}</p>}
           </section>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">02 / DISTRIBUTION</span><h2>구역별 적재 현황</h2></div><span className="micro-note">PostgreSQL 공식 집계</span></div><div className="zone-grid">{ZONES.map(zone=><div key={zone} className="zone-tile"><span className={`zone-symbol zone-${zone.toLowerCase()}`}>{zone==='RECHECK'?'R':zone==='HOLD'?'H':zone}</span><div><strong>{zone}</strong><small>{zone==='HOLD'?'보류 구역':zone==='RECHECK'?'재확인 구역':'기본 적재 구역'}</small></div><b>{summary?String(summary.by_zone[zone]??0):'—'}<small>건</small></b></div>)}</div></section>

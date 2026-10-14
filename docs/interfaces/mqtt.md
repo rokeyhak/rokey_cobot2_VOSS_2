@@ -14,8 +14,8 @@
 - **확정:** Mosquitto 는 공용 PC **호스트**에서 1883/TCP 로 실행한다(ADR-0006, #55 MC-026, #20). Spring Boot 와 hmi_bridge 는 모두 `127.0.0.1:1883` 로 연결한다.
 - Mosquitto listener 자체는 `0.0.0.0:1883` 을 사용하되 방화벽으로 노출을 제한한다. `enp4s0`(로봇망)은 항상 차단한다. `wlo1` 은 개발 중 개인 PC의 읽기 전용 디버깅이 필요할 때만 임시로 열고, **시연 때는 1883/wlo1 을 닫는다**. HMI는 공용 PC의 Spring Boot가 로컬로 붙으므로 시연 기능에는 영향이 없다.
 - `allow_anonymous false`. 비밀번호 파일과 실제 비밀번호는 Git에 넣지 않고 공용 PC에서 생성한다(`.env`/로컬 파일만). ACL은 아래처럼 고정한다.
-  - `web`: `voss/command` write, `voss/#` read
-  - `bridge`: `voss/command` read. write는 #20 확정 6개(`voss/state`·`voss/result`·`voss/zone_map`·`voss/robot`·`voss/command/ack`·`voss/log_status`)와 10/14 승인 표시 토픽 `voss/box_track`·`voss/robot_pose`·`voss/robot_joints`·`voss/voice_status`, Sprint 2 `voss/pallet/state`, 제안 `voss/box_motion`(발행자 생기기 전엔 쓰지 않음)만 허용한다 (`voss/command` write 금지). 템플릿 = `docker/mqtt/acl`
+  - `web`: `voss/command`·`voss/voice/request` write, `voss/#` read
+  - `bridge`: `voss/command`·`voss/voice/request` read. write는 #20 확정 6개(`voss/state`·`voss/result`·`voss/zone_map`·`voss/robot`·`voss/command/ack`·`voss/log_status`)와 10/14 승인 표시 토픽 `voss/box_track`·`voss/robot_pose`·`voss/robot_joints`·`voss/voice_status`, Sprint 2 `voss/pallet/state`, 제안 `voss/box_motion`(발행자 생기기 전엔 쓰지 않음)만 허용한다 (`voss/command` write 금지). 템플릿 = `docker/mqtt/acl`
   - `debug`: `voss/#` read only
   - `voice_preview`: `voss/voice_status` write 하나만 (격리 음성 시험 전용, 아래 "음성 표시등 이벤트")
 - 런타임 계정의 비밀번호는 환경 변수로 주입한다. hmi_bridge 는 `VOSS_MQTT_BRIDGE_PASSWORD`, Spring Boot 는 웹 컨테이너의 MQTT 비밀번호 변수를 사용한다.
@@ -33,6 +33,7 @@
 | `voss/voice_status` | ROS → 웹 | 0 | false | `{"phase","event_id","utterance_id"}` — `/voss/voice/status` 검증·필드 최소화 후 연결 중에만 전달, SSE `voice_status`(retained 거부). 아래 "음성 표시등 이벤트" |
 | `voss/box_motion` (제안) | ROS → 웹 | 1 | false | `{"session_id","box_id","track_id","phase":"GRASPED|RELEASED","stamp","zone"}` — BoxMotion IDL 생긴 뒤. SSE `box_motion` |
 | `voss/command` | 웹 → ROS | 1 | false | `{"command_id", "type", "args", "raw_text", "sent_at"}` — Spring Boot 가 `command_id`(UUID)·`sent_at` 을 붙인다(web_api.md `POST /api/commands`) |
+| `voss/voice/request` | 웹 → ROS | 1 | false | `{"request_id","action","sent_at"}` — 로컬 HMI 버튼 처리 뒤 별도 발행. bridge가 허용된 action을 고정 안내 문구로 바꾸어 `/voss/voice/say`에 발행한다. 로봇 명령 접수·동작 완료를 뜻하지 않는다. 임의 문구·retained·오래된 요청은 거부한다 |
 | `voss/command/ack` | ROS → 웹 | 1 | false | `{"command_id", "ok", "message", "acked_at"}` — `/voss/sort/command` 응답(= manager **접수**, 완료 아님) |
 | `voss/log_status` | ROS → 웹 | 1 | **true** | `{"status":"STARTING|OK|DB_ERROR|SPOOL_FULL","stamp":"…"}` — `/voss/log/status` 값을 hmi_bridge 가 전달. Spring Boot 재기동 직후에도 마지막 logger 상태를 받기 위해 retained |
 | `voss/pallet/state` | ROS → 웹 | 1 | **true** | **Sprint 2.** PalletState 필드 이름 그대로: `run_id`, `state`, `route`, `dongs`, `load`, `overflow`, `excluded`, `overflow_warning`, `total`, `done`, `failed`, `box_id`, `slot_state`, `slot_box_id`, `slot_dong`(voss_msgs.md, 칸 배열 16 = slot 0~15). 3D 팔레트·진행률·구역별 실을 수/초과/경로 제외·"배송 물량 남음" 경고(TR-PAL-10, BRD v1.5). Spring Boot 재기동 직후에도 마지막 배치도를 받기 위해 retained |

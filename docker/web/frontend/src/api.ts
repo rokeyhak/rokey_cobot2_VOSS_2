@@ -44,3 +44,6 @@ export type CommandArgs = Record<string,string|string[]>;  // palletize 의 rout
 export function issueCommand(type:CommandType,args:CommandArgs={}):Promise<{command_id:string}> {
   return request('/api/commands',{method:'POST',body:JSON.stringify({type,args,raw_text:'HMI 버튼'})});
 }
+export function announceVoice(action:CommandType|'plan'):Promise<{request_id:string}> {
+  return request('/api/voice/announce',{method:'POST',body:JSON.stringify({action})});
+}

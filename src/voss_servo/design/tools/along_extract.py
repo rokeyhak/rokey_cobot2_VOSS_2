@@ -6,6 +6,8 @@ y = TCP − 박스 중심 (벨트 방향, mm). + = TCP 가 하류(박스 앞쪽�
 
 사용: python3 along_extract.py <servo_ticks_*.jsonl …> [--goals 앞8,앞8] [--manual 자측정.csv]
       [--boxes 박스.csv] [--v-ref 47.3 …] [--kp 1.0] [--csv 출력.csv]
+      [--contact rx|sent] [--v0 block|run]
+기준 박스 속도(--v0 block)는 같은 설정 묶음(config_sha, params_sha — 시간상 떨어진 블록도 한 묶음)의 중앙값.
 """
 
 from __future__ import annotations
@@ -26,7 +28,13 @@ K_LAST_OBS = 20  # 박스 절편에 쓰는 사각 직전 관측 수
 MIN_OBS = 5  # 절편에 필요한 최소 관측 수
 TRACK_SETTLE_S = 1.5  # 추종 중 박스 속도: TRACK 시작 + 이 시간 뒤 관측만
 MIN_TRACK_OBS = 10  # 추종 중 박스 속도에 필요한 최소 관측 수
-CONTACT_LEAD_S = 0.15  # 접촉 ≈ 닫기 응답 rx − 0.15 s (U13 2.3)
+CONTACT_LEAD_S = (
+    0.15  # 접촉 ≈ 닫기 응답 rx − 0.15 s (U13 2.3, 1부 가정 — 기본값 유지: 10/13 기록과 같은 정의)
+)
+CONTACT_FROM_SENT_S = (
+    1.38  # 접촉 ≈ 닫기 명령 + 1.38 s (U13 2부 B: RG2 무부하 개방 37회 속도로 49.5 mm 행정)
+)
+V_OFF_FLAG = 0.2  # 회차 박스 속도가 블록 중앙값에서 이만큼(mm/s) 넘게 벗어나면 표시 (1부 재검 #3)
 
 
 # ───────────────────────── 읽기 ─────────────────────────
@@ -82,6 +90,7 @@ class Events:
     grip: bool | None
     reason: str | None
     grasped: bool | None
+    attempt: int | None  # 마지막 시도 번호 (1 = 첫 시도, 2 이상 = 재시도)
     ff_mmps: float | None
     config_sha: str | None
     params_sha: str | None
@@ -136,6 +145,7 @@ def find_events(rows: list[dict]) -> tuple[Events | None, str]:
         grip=close.get("grip_detected"),
         reason=last.get("reason"),
         grasped=last.get("grasped"),
+        attempt=last.get("attempt"),
         ff_mmps=speed * 1000.0 if speed is not None else None,  # m/s → mm/s
         config_sha=last.get("config_sha256"),
         params_sha=last.get("params_sha256"),
@@ -195,8 +205,40 @@ def band_tail_pred(e_align: float, dv: float, t_vis: float, kp: float) -> float:
     return e_ss + (e_align - e_ss) * math.exp(-kp * t_vis)
 
 
-def reconstruct(rows: list[dict], ev: Events, refs: list[float], kp: float) -> dict:
-    """한 goal → 회차 1행 dict. 관측이 모자라면 y 칸은 None 이고 note 에 이유."""
+def track_speed(ot: np.ndarray, os_: np.ndarray, ev: Events) -> float | None:
+    """추종 중 박스 속도 mm/s: TRACK 이 자리 잡은 뒤 ~ 사각 전 (카메라가 박스를 따라감 → 스케일 편향 작음)."""
+    if len(ot) == 0:
+        return None
+    t0 = (ev.t_track or ot[0]) + TRACK_SETTLE_S
+    m = ot > t0
+    fit = fit_line(ot[m], os_[m]) if m.sum() >= MIN_TRACK_OBS else None
+    return fit[0] if fit else None
+
+
+def goal_track_speed(rows: list[dict], ev: Events) -> float | None:
+    """한 goal 의 추종 중 박스 속도 (블록 중앙값을 먼저 구할 때 쓴다)."""
+    ot, os_ = obs_series(rows, ev.t_blind, belt_dir(rows))
+    return track_speed(ot, os_, ev)
+
+
+def block_key(ev: Events) -> tuple:
+    """같은 설정으로 돈 회차 묶음(블록) = (config_sha, params_sha)."""
+    return (ev.config_sha, ev.params_sha)
+
+
+def reconstruct(
+    rows: list[dict],
+    ev: Events,
+    refs: list[float],
+    kp: float,
+    v0_block: float | None = None,
+    contact: str = "rx",
+) -> dict:
+    """한 goal → 회차 1행 dict. 관측이 모자라면 y 칸은 None 이고 note 에 이유.
+
+    기준 박스 속도 v0 = 블록 중앙값(v0_block, 기본) → 없으면 회차 값 → 없으면 refs[0].
+    회차 값으로 본 y 는 진단 열 y_con_run 에 남긴다 (1부 재검 #3: 회차 값은 이상치에 약하다).
+    """
     d = belt_dir(rows)
     rec = base_record(rows, ev)
     ot, os_ = obs_series(rows, ev.t_blind, d)  # 사각 전 박스
@@ -204,17 +246,12 @@ def reconstruct(rows: list[dict], ev: Events, refs: list[float], kp: float) -> d
     if len(ot) < MIN_OBS or len(pt) < 2:
         rec["note"] = f"obs < {MIN_OBS}"
         return rec
-    # 추종 중 박스 속도: TRACK 이 자리 잡은 뒤 ~ 사각 전 (카메라가 박스를 따라감 → 스케일 편향 작음)
-    t0 = (ev.t_track or ot[0]) + TRACK_SETTLE_S
-    m = ot > t0
-    track_fit = fit_line(ot[m], os_[m]) if m.sum() >= MIN_TRACK_OBS else None
-    v_box = track_fit[0] if track_fit else None
+    v_box = track_speed(ot, os_, ev)  # 이 회차의 추종 중 박스 속도
     # 사각 진입 ~ 닫기 응답 동안의 TCP 속도 (FF 만으로 가는 구간)
     mb = (pt >= ev.t_blind) & (pt <= ev.close_rx)
     tcp_fit = fit_line(pt[mb], ps[mb]) if mb.sum() >= 3 else None
     v_tcp = tcp_fit[0] if tcp_fit else None
     rec.update(v_box_track=v_box, v_tcp_blind=v_tcp)
-    rec["dv"] = v_tcp - v_box if v_box is not None and v_tcp is not None else None
     tl, sl = ot[-K_LAST_OBS:], os_[-K_LAST_OBS:]  # 사각 직전 관측
 
     def y_at(t: float, v: float) -> float:
@@ -222,11 +259,23 @@ def reconstruct(rows: list[dict], ev: Events, refs: list[float], kp: float) -> d
         box = box_intercept(tl, sl, v) + v * (t - tl[-1])
         return float(np.interp(t, pt, ps)) - box
 
-    v0 = v_box if v_box is not None else (refs[0] if refs else None)  # 기준 속도
+    v0 = v0_block if v0_block is not None else v_box  # 기준 속도: 블록 중앙값 우선
+    if v0 is None:
+        v0 = refs[0] if refs else None
     if v0 is None:
         rec["note"] = "no box speed"
         return rec
-    t_con = ev.close_rx - CONTACT_LEAD_S  # 접촉 추정 시각
+    rec["v0"] = v0
+    rec["dv"] = v_tcp - v0 if v_tcp is not None else None  # 회귀에 쓰는 Δv 도 같은 기준
+    if v_box is not None and v0_block is not None and abs(v_box - v0_block) > V_OFF_FLAG:
+        flag = f"v_box {v_box - v0_block:+.2f} off block median"  # 이상치 표시
+        rec["note"] = (rec["note"] + " " + flag).strip()  # retry 표시를 덮지 않게
+    if contact == "sent":  # 접촉 = 명령 + 1.38 s (2부 판정)
+        t_con = ev.close_sent + CONTACT_FROM_SENT_S
+    else:  # 접촉 = 응답 − 0.15 s (1부 가정, 기본)
+        t_con = ev.close_rx - CONTACT_LEAD_S
+    if v_box is not None:
+        rec["y_con_run"] = y_at(t_con, v_box)  # 진단: 회차 값 기준
     rec.update(
         y_cmd=y_at(ev.close_sent, v0),
         y_con=y_at(t_con, v0),
@@ -259,7 +308,8 @@ def base_record(rows: list[dict], ev: Events) -> dict:
         "blind_rx": ev.close_rx - ev.t_blind,
         "close_s": ev.close_rx - ev.close_sent,
         "width": ev.width_mm,
-        "note": "",
+        "attempt": ev.attempt,
+        "note": "retry" if (ev.attempt or 1) > 1 else "",  # 재시도 회차는 요약에서 뺀다 (재검 #18)
     }
 
 
@@ -350,8 +400,12 @@ def ols(x, y) -> dict | None:
 
 
 def ok_recs(recs: list[dict]) -> list[dict]:
-    """요약에 쓰는 회차: 쥐었고 y 가 계산된 것."""
-    return [r for r in recs if r.get("grasped") and r.get("y_con") is not None]
+    """요약에 쓰는 회차: 쥐었고 y 가 계산됐고 첫 시도인 것."""
+    return [
+        r
+        for r in recs
+        if r.get("grasped") and r.get("y_con") is not None and (r.get("attempt") or 1) <= 1
+    ]
 
 
 def mean_sd(vals: list[float]) -> str:
@@ -386,7 +440,8 @@ def level_table(recs: list[dict]) -> list[list[str]]:
 
 
 def fit_table(recs: list[dict]) -> list[list[str]]:
-    """회귀 세 줄: ① 로그 y ~ Δv ② 자 y ~ Δv ③ 사각 진입 y ~ 정렬 띠 꼬리 예측(모형 검증).
+    """회귀: ① 로그 y ~ Δv ② 자 y ~ Δv ③ 사각 진입 y ~ 정렬 띠 꼬리 예측(모형 검증)
+    ④ b_phys ~ Δv (접촉 시각) ⑤ b_phys ~ Δv·닫기 시간 (미끄러짐/접촉 지연 구분).
 
     사각 뒤 구간은 TCP 가 FF 로, 박스가 기준 속도로 외삽되므로 정의상 Δv·시간이 더해질 뿐이다.
     로그로 검증할 수 있는 것은 사각 진입까지(정렬 띠 꼬리) — ③ 이 k ≈ 1, 절편 ≈ 0 이면 맞다.
@@ -405,6 +460,18 @@ def fit_table(recs: list[dict]) -> list[list[str]]:
             "③ 사각 y ~ 꼬리 예측 (모형 검증)",
             [r["y_blind_pred"] for r in rs if r.get("y_blind_pred") is not None],
             [r["y_blind"] for r in rs if r.get("y_blind_pred") is not None],
+            "k",
+        ),
+    ]
+    bp = [r for r in rs if r.get("b_phys") is not None]
+    lines += [
+        # 접촉이 가정(rx − 0.15)보다 L 초 이르면 b_phys = 상수 − L·Δv → 기울기 = −L (재검 #10)
+        ("④ b_phys ~ Δv (접촉 시각)", [r["dv"] for r in bp], [r["b_phys"] for r in bp], "−L s"),
+        # 닫힘이 길수록 커지는 효과(미끄러짐·접촉 지연)면 Δv·닫힘 시간에 더 잘 맞는다
+        (
+            "⑤ b_phys ~ Δv·닫기 s",
+            [r["dv"] * r["close_s"] for r in bp],
+            [r["b_phys"] for r in bp],
             "k",
         ),
     ]
@@ -436,6 +503,7 @@ RUN_COLS = [
     ("close_s", "닫기 s", "{:.2f}"),
     ("width", "폭", "{:.1f}"),
     ("v_box_track", "v_box", "{:.2f}"),
+    ("v0", "v0", "{:.2f}"),
     ("dv", "Δv", "{:+.2f}"),
     ("e_align", "정렬 y", "{:+.2f}"),
     ("y_blind", "사각 y", "{:+.2f}"),
@@ -443,6 +511,7 @@ RUN_COLS = [
     ("y_cmd", "y_cmd", "{:+.2f}"),
     ("y_con", "**y_con**", "{:+.2f}"),
     ("y_rx", "y_rx", "{:+.2f}"),
+    ("y_con_run", "y_con(회차 v)", "{:+.2f}"),
     ("box", "박스", "{}"),
     ("y_phys", "y_phys", "{:+.1f}"),
     ("b_phys", "b_phys", "{:+.2f}"),
@@ -499,6 +568,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--boxes", type=Path, help="박스 송장 오프셋 CSV")
     p.add_argument("--v-ref", type=float, action="append", default=[], help="기준 박스 속도 mm/s")
     p.add_argument("--kp", type=float, default=1.0, help="control.kp_per_s (꼬리 예측용)")
+    p.add_argument(
+        "--contact",
+        choices=("rx", "sent"),
+        default="rx",
+        help="접촉 시각: rx = 응답 − 0.15 s(기본, 10/13 기록 정의) | sent = 명령 + 1.38 s(2부 판정)",
+    )
+    p.add_argument(
+        "--v0",
+        choices=("block", "run"),
+        default="block",
+        help="기준 박스 속도: 블록 중앙값|회차 값",
+    )
     p.add_argument("--csv", type=Path, help="회차표 CSV 출력 경로")
     return p.parse_args(argv)
 
@@ -508,17 +589,28 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     wanted = {g.strip()[:8] for g in args.goals.split(",") if g.strip()}
     recs: list[dict] = []
+    found: list[tuple] = []  # (goal8, rows, ev 또는 None, 이유)
     try:
         for path in args.ticks:
             for gid, rows in load_goals(path).items():
                 if wanted and gid not in wanted:
                     continue
                 ev, why = find_events(rows)
-                if ev is None:
-                    last = rows[-1]
-                    recs.append({"goal": gid, "reason": last.get("reason"), "note": why})
-                    continue
-                recs.append(reconstruct(rows, ev, args.v_ref, args.kp))
+                found.append((gid, rows, ev, why))
+        # 1차: 블록(같은 설정)별 추종 중 박스 속도 중앙값
+        speeds: dict[tuple, list[float]] = {}
+        for _, rows, ev, _ in found:
+            v = goal_track_speed(rows, ev) if ev and (ev.attempt or 1) <= 1 else None
+            if v is not None:
+                speeds.setdefault(block_key(ev), []).append(v)
+        median = {k: statistics.median(v) for k, v in speeds.items()}
+        # 2차: 블록 중앙값을 기준으로 재구성 (--v0 run 이면 회차 값)
+        for gid, rows, ev, why in found:
+            if ev is None:
+                recs.append({"goal": gid, "reason": rows[-1].get("reason"), "note": why})
+                continue
+            v0b = median.get(block_key(ev)) if args.v0 == "block" else None
+            recs.append(reconstruct(rows, ev, args.v_ref, args.kp, v0b, args.contact))
         manual = read_manual(args.manual) if args.manual else {}
         boxes = read_boxes(args.boxes) if args.boxes else {}
     except OSError as exc:
@@ -528,7 +620,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"경고: 자 측정 goal {gid} 가 로그에 없음", file=sys.stderr)
     for r in recs:
         attach_manual(r, manual, boxes)
-    print("## 회차 (y + = TCP 하류, mm · 기준 = 회차별 추종 중 박스 속도)\n")
+    basis = "블록 중앙값" if args.v0 == "block" else "회차 값"
+    print(f"## 회차 (y + = TCP 하류, mm · 기준 v0 = 추종 중 박스 속도 {basis})\n")
     print(run_table(recs, args.v_ref))
     print("\n## FF 수준별 (쥔 회차만)\n")
     head = ["FF cm/s", "n", "y_con", "y_phys", "b_phys", "b0", "v_box mm/s"]

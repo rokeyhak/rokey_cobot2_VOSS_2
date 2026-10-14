@@ -143,3 +143,55 @@ def test_t8_reproduce_1012():
         out[name] = sum(ys) / len(ys)
     assert out["s2"] == pytest.approx(6.26, abs=0.05)
     assert out["s3"] == pytest.approx(3.02, abs=0.05)
+
+
+def test_t9_block_median_basis():
+    """T9: 블록 중앙값을 주면 그 속도로 외삽하고, 회차 값은 진단 열·이상치 표시로 남는다."""
+    rows = fake_goal(v_box=46.9)
+    ev, _ = ax.find_events(rows)
+    rec = ax.reconstruct(rows, ev, refs=[], kp=1.0, v0_block=47.3)
+    assert rec["v0"] == pytest.approx(47.3)
+    assert rec["y_con_run"] == pytest.approx(6.015, abs=0.01)  # 회차 값(46.9) 기준
+    # 기울기 고정 절편은 마지막 20 관측의 평균 시각(끝 164/30 s − 19/60 s) 기준 → 외삽 길이 3.367 s
+    t_mid = 164 / 30 - 19 / 60
+    assert rec["y_con"] == pytest.approx(6.015 - 0.4 * (9.15 - t_mid), abs=0.01)
+    assert rec["dv"] == pytest.approx(48.0 - 47.3, abs=1e-6)
+    assert "off block median" in rec["note"]
+
+
+def test_t10_retry_excluded():
+    """T10: 재시도(attempt ≥ 2) 회차는 표시되고 요약에서 빠진다."""
+    rows = fake_goal()
+    rows[-1]["attempt"] = 2
+    ev, _ = ax.find_events(rows)
+    rec = ax.reconstruct(rows, ev, refs=[], kp=1.0)
+    assert rec["note"].startswith("retry")
+    assert ax.ok_recs([rec]) == []
+
+
+def test_t11_contact_lead_regression():
+    """T11: b_phys = 3 − 0.3·Δv 이면 ④ 의 절편 +3.00, 기울기 −0.30 (접촉이 0.3 s 이름)."""
+    recs = []
+    for i, dv in enumerate([-1.2, -0.9, 0.0, 0.6, 1.1]):
+        recs.append(
+            {
+                "goal": f"g{i}",
+                "grasped": True,
+                "attempt": 1,
+                "y_con": 1.0,
+                "dv": dv,
+                "close_s": 1.7,
+                "b_phys": 3.0 - 0.3 * dv,
+            }
+        )
+    rows = {r[0]: r for r in ax.fit_table(recs)}
+    assert rows["④ b_phys ~ Δv (접촉 시각)"][2].startswith("+3.00")
+    assert "-0.30" in rows["④ b_phys ~ Δv (접촉 시각)"][3]
+
+
+def test_t12_contact_from_sent():
+    """T12: --contact sent 이면 접촉 = 명령 7.6 + 1.38 = 8.98 s → y = 2.0 + 1.1 × (8.98 − 5.5)."""
+    rows = fake_goal()
+    ev, _ = ax.find_events(rows)
+    rec = ax.reconstruct(rows, ev, refs=[], kp=1.0, contact="sent")
+    assert rec["y_con"] == pytest.approx(2.0 + 1.1 * (7.6 + 1.38 - 5.5), abs=0.01)

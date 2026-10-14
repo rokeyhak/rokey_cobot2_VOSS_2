@@ -4,46 +4,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import cv2
-import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
 from voss_msgs.msg import BoxTrack
 from voss_vision.camera_frames import CameraFrames
+from voss_vision.camera_render import render_jpeg
 
 
 def stamp_key(stamp):
     return stamp.sec * 1_000_000_000 + stamp.nanosec
-
-
-def render_jpeg(message, boxes):
-    if message.encoding not in ("rgb8", "bgr8"):
-        raise ValueError("Preview requires rgb8 or bgr8")
-    frame = np.frombuffer(message.data, dtype=np.uint8).reshape(message.height, message.step)
-    frame = frame[:, : message.width * 3].reshape(message.height, message.width, 3).copy()
-    if message.encoding == "rgb8":
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    for track_id, (x, y, w, h) in boxes.items():
-        left, top = max(0, x), max(0, y)
-        right, bottom = min(message.width - 1, x + w), min(message.height - 1, y + h)
-        if w <= 0 or h <= 0 or right <= left or bottom <= top:
-            continue
-        cv2.rectangle(frame, (left, top), (right, bottom), (70, 230, 100), 2)
-        cv2.putText(
-            frame,
-            f"BOX {track_id}",
-            (left, max(16, top - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (70, 230, 100),
-            2,
-        )
-    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    if not ok:
-        raise ValueError("JPEG encoding failed")
-    return jpeg.tobytes()
 
 
 class CameraPreview(Node):
@@ -109,7 +82,7 @@ def main(args=None):
     try:
         node = CameraPreview()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if node is not None:

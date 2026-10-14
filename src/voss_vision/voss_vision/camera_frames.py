@@ -6,7 +6,7 @@ from threading import Lock
 
 
 class CameraFrames:
-    def __init__(self, capacity=30, stale_s=1.0, delay_s=0.2):
+    def __init__(self, capacity=10, stale_s=1.0, delay_s=0.2):
         self.capacity, self.stale_s, self.delay_s = capacity, stale_s, delay_s
         self.frames = OrderedDict()
         self.boxes = OrderedDict()

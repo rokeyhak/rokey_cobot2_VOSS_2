@@ -18,6 +18,7 @@
 - 백엔드: `voss/pallet/state` 구독(QoS 1) → SSE `pallet_state`(접속 스냅샷 포함), `palletize` route 검사, `reset_zone PALLET`, SortState `PALLETIZING` 수용(빠지면 팔레타이징 중 3초 뒤 UNKNOWN).
 - 시험: `npm test`(Node 22 내장 `node --test`, `test/fixtures/pallet_s1.json` = 실제 pallet_fsm 이 만든 S1 + slot 4 실패·#37 당겨 놓기 PalletState 열 — 손으로 고치지 않는다), `./gradlew test`.
 - 공용 PC 재생·반영 ≤ 1초: `scripts/integration/README.md` "S2-T08".
+- 로컬 표시 시험: `http://localhost/?palletReplay=1`에서 16칸을 순서대로 재생한다. 이 모드는 시험 재생 표시와 함께 팔레트 조작을 끈다.
 
 ## 공용 PC에서 테스트
 
@@ -105,6 +106,10 @@ colcon build --packages-up-to voss_vision
 source install/setup.bash
 ros2 run voss_vision camera_preview
 ```
+
+공용 PC 한 대에서 시연할 때는 그 PC에서 위 명령을 실행한 뒤 `http://localhost` → **카메라** → **그리퍼 카메라 · 영상 연결**로 확인합니다. 영상의 `T3` 같은 표시는 비전 트랙 번호이며 분류 이력의 BOX 번호와 다릅니다. 송출 노드의 `host` 기본값 `127.0.0.1`을 유지하고 `host:=0.0.0.0`으로 바꾸지 마세요. 그러면 카메라 영상이 Wi-Fi 쪽에 열립니다.
+
+송출 노드는 최근 원본 프레임 최대 10장만 보관하고 JPEG 전송 전에 최대 960×540으로 줄입니다. box_tracker·OCR·belt_servo와 함께 실행할 때의 실제 부하는 아직 측정하지 않았으므로 게이트 측정 중에는 송출 노드를 실행하지 않습니다.
 
 Web PC의 개발 서버(`npm run dev`)는 `/camera/gripper/frame.jpg`를 로컬 `127.0.0.1:8091`로 전달합니다. 따라서 개발 서버를 실행하는 PC에서 송출 노드의 `127.0.0.1:8091`에 닿아야 합니다. 카메라 메뉴의 **그리퍼 카메라 → 영상 연결**을 누르면 프레임을 요청합니다. 송출 노드가 실행되지 않았거나 입력 영상이 없으면 OFFLINE으로 표시됩니다. 배포 Nginx의 이 경로는 로컬 접속만 허용합니다.
 

@@ -12,7 +12,7 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
   python3 tools/vision/box_overlay.py --live [--candidates] [--hz 10] [--out live.mp4]
 
 화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `BOX<번호> <채움 %>`(+ OCR 결과). 번호 = sort_manager box_id 끝 순번
-(`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 `BOX-`, 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+(`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 번호 없이 `BOX`, 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
 채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
 학습 모델의 신뢰도가 아니라 seg 판정값이다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
@@ -97,9 +97,9 @@ def box_seq(box_id: str) -> int | None:
 
 
 def box_label(track_id: int, box_no: dict[int, int] | None) -> str:
-    """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX-."""
+    """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX."""
     n = (box_no or {}).get(track_id)
-    return f"BOX{n}" if n is not None else "BOX-"
+    return f"BOX{n}" if n is not None else "BOX"
 
 
 def yaw_text(t) -> str | None:

@@ -12,10 +12,11 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
   python3 tools/vision/box_overlay.py --live [--candidates] [--hz 10] [--out live.mp4]
 
 화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `BOX<번호> <채움 %>`(+ OCR 결과). 번호 = sort_manager box_id 끝 순번
-(`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 번호 없이 `BOX`, 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+(`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 번호 없이 `BOX`. 번호는 지금
+세션 것만(새 start 면 버림, box_tracker 재시작으로 같은 track_id 가 다시 나와도 버림). 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
 채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
-학습 모델의 신뢰도가 아니라 seg 판정값이다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
+학습 모델의 신뢰도가 아니라 seg 판정값이다. 짝이 없으면 `-%`, 실시간 --no-score 면 % 를 안 쓴다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
 반시계 +, (−90, 90], 1° 단위(벨트 기준과는 약 0.7° 차). 노란 선은 같은 프레임 송장 후보의 긴 축(픽셀)이라 yaw 필드가 없어도 그린다.
 녹화 재생은 끝에 "발행 끊김"(트랙이 사라진 프레임의 단계·높이·후보 판정)을 찍는다. CSV 는 프레임마다 같은 값.
 """
@@ -56,6 +57,7 @@ NAME = {"": "통과", "border": "가장자리", "aspect": "비율", "fill": "채
 TRACK = (0, 230, 0)
 ANGLE = (0, 230, 255)  # 노랑 — 각도만 (의석 제안 10/14: bbox·글자는 초록, 각도는 노랑)
 MATCH_PX = 40  # 트랙 중심과 송장 후보 중심이 이 안이면 같은 박스
+GONE_NS = 5_000_000_000  # 이만큼 안 보이다 다시 나온 track_id 는 다른 박스(box_tracker 재시작)
 FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
@@ -96,10 +98,37 @@ def box_seq(box_id: str) -> int | None:
     return int(tail) if tail.isdigit() else None
 
 
-def box_label(track_id: int, box_no: dict[int, int] | None) -> str:
-    """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX."""
-    n = (box_no or {}).get(track_id)
-    return f"BOX{n}" if n is not None else "BOX"
+class BoxNumbers:
+    """track_id → sort_manager 순번. 번호는 지금 세션 것만 쓴다 — 세션이 바뀌면(새 start) 앞 세션 번호를 버리고,
+    같은 track_id 가 GONE_NS 넘게 안 보이다 다시 나오면(box_tracker 재시작으로 id 가 1 부터 다시) 그 번호도 버린다."""
+
+    def __init__(self) -> None:
+        self.session = ""
+        self.no: dict[int, int] = {}
+        self.seen: dict[int, int] = {}  # track_id → 마지막으로 보인 촬영 시각 ns
+
+    def sort_msg(self, box_id: str, track_id: int, session_id: str = "") -> None:
+        """SortState·SortResult 한 건. session_id 가 없는 옛 빌드는 box_id 앞부분(`<session_id>-`)으로 안다."""
+        seq = box_seq(box_id)
+        session = session_id or (box_id.rsplit("-", 1)[0] if seq is not None else "")
+        if session and session != self.session:
+            self.session = session
+            self.no.clear()
+        if seq is not None and track_id >= 0:
+            self.no[track_id] = seq
+
+    def tracks(self, t_ns: int, ids) -> None:
+        """이 촬영 시각에 발행된 track_id 들."""
+        for tid in ids:
+            last = self.seen.get(tid)
+            if last is not None and t_ns - last > GONE_NS:
+                self.no.pop(tid, None)
+            self.seen[tid] = t_ns
+
+    def label(self, track_id: int) -> str:
+        """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX."""
+        n = self.no.get(track_id)
+        return f"BOX{n}" if n is not None else "BOX"
 
 
 def yaw_text(t) -> str | None:
@@ -144,10 +173,11 @@ class Painter:
         labels,
         header: list[str],
         score_cands=None,
-        box_no: dict[int, int] | None = None,
+        box_no: BoxNumbers | None = None,
+        score: bool = True,
     ) -> np.ndarray:
         """score_cands: 채움 %·긴 축을 찾을 후보(기본 = cands). 실시간에서 후보는 그리지 않고 % 만 볼 때 따로 준다.
-        box_no: track_id → sort_manager 순번(SortState·SortResult 의 box_id 끝 3자리)."""
+        box_no: sort_manager 순번. score=False(실시간 --no-score)면 % 를 쓰지 않는다 — `-%` 는 판정은 했는데 짝이 없을 때만."""
         s = self.scale
         img = (
             cv2.resize(bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
@@ -189,8 +219,9 @@ class Painter:
                 img, (int(x * s), int(y * s)), (int((x + w) * s), int((y + h) * s)), TRACK, 2
             )
             c = match_candidate(t, cands if score_cands is None else score_cands)
-            pct = f"{c.fill * 100:.0f}%" if c is not None else "-%"
-            line = f"{box_label(t.track_id, box_no)} {pct}"
+            line = box_no.label(t.track_id) if box_no is not None else "BOX"
+            if score:
+                line += f" {c.fill * 100:.0f}%" if c is not None else " -%"
             if not t.position_valid:
                 line += " 무효"
             lab = labels.get(t.track_id)
@@ -300,7 +331,7 @@ def read_side(bag: Path):
     cls = {t: get_message(types[t]) for t in side if t in types}
     boxes: dict[int, list] = {}
     labels, state, phase = Series(), Series(), Series()
-    numbering = Series()  # (track_id, sort_manager 순번) — 그 시각부터 화면에 쓴다
+    numbering = Series()  # (box_id, track_id, session_id) — 그 시각부터 BoxNumbers 에 넣는다
     pose_t, pose_z = [], []
     bad: dict[
         str, int
@@ -322,9 +353,7 @@ def read_side(bag: Path):
         elif topic in (T_STATE, T_RESULT):
             if topic == T_STATE:
                 state.add(t_recv, (m.state, m.track_id))
-            seq = box_seq(m.box_id)
-            if seq is not None and m.track_id >= 0:
-                numbering.add(t_recv, (m.track_id, seq))
+            numbering.add(t_recv, (m.box_id, m.track_id, getattr(m, "session_id", "")))
         elif topic == T_FB:
             phase.add(t_recv, m.feedback.phase)
     for t, n in bad.items():
@@ -351,7 +380,7 @@ def run_bag(args, p: SegParams, plane_z: float) -> None:
     from rosidl_runtime_py.utilities import get_message
 
     boxes, labels, state, phase, numbering, pose_t, pose_z = read_side(args.bag)
-    box_no: dict[int, int] = {}  # 이 프레임까지 받은 track_id → sort_manager 순번
+    box_no = BoxNumbers()  # 이 프레임까지 받은 SortState·SortResult 로 정한 번호
     n_num = 0
     _, types = open_reader(args.bag)
     img_topic = args.image_topic or next((t for t in IMG_TOPICS if t in types), None)
@@ -417,9 +446,9 @@ def run_bag(args, p: SegParams, plane_z: float) -> None:
             f"후보: {count_text(count)}   가장 큰 후보 아래끝 v {bottom_v if bottom_v is not None else '-'} / {bgr.shape[0]}",
         ]
         while n_num < len(numbering.t) and numbering.t[n_num] <= t_recv:
-            tid, seq = numbering.v[n_num]
-            box_no[tid] = seq
+            box_no.sort_msg(*numbering.v[n_num])
             n_num += 1
+        box_no.tracks(t_cam, ids)
         out = painter.render(
             bgr, cands, p, tracks, latest_labels(labels, t_recv), header, box_no=box_no
         )
@@ -480,7 +509,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.boxes: dict[int, list] = {}
             self.last_box_t = 0
             self.labels: dict[int, LabelRead] = {}
-            self.box_no: dict[int, int] = {}  # track_id → sort_manager 순번
+            self.box_no = BoxNumbers()
             self.pose_z = None
             self.state = ("-", -1)
             self.phase = ("-", 0.0)
@@ -508,9 +537,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
 
         def on_numbered(self, m) -> None:
             """SortState·SortResult 의 box_id 끝 순번을 그 track_id 에 붙인다(sort_manager 와 같은 번호)."""
-            seq = box_seq(m.box_id)
-            if seq is not None and m.track_id >= 0:
-                self.box_no[m.track_id] = seq
+            self.box_no.sort_msg(m.box_id, m.track_id, getattr(m, "session_id", ""))
 
         def on_state(self, m: SortState) -> None:
             self.state = (m.state, m.track_id)
@@ -519,6 +546,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
         def on_box(self, m: BoxTrack) -> None:
             t = ns(m.stamp)
             self.boxes.setdefault(t, []).append(m)
+            self.box_no.tracks(t, (m.track_id,))
             self.last_box_t = max(self.last_box_t, t)
             for old in [k for k in self.boxes if k < t - 1_000_000_000]:
                 del self.boxes[old]
@@ -533,7 +561,8 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             t = ns(msg.header.stamp)
             bgr = decode(msg, self.compressed)
             # 채움 % 를 내려면 같은 판정이 필요하다 — 후보 사각형은 --candidates 일 때만 그린다
-            scored = detect_candidates(bgr, p)[1] if (args.candidates or not args.no_score) else []
+            score = args.candidates or not args.no_score
+            scored = detect_candidates(bgr, p)[1] if score else []
             cands = scored if args.candidates else []
             tracks = self.boxes.get(t, [])
             ph = self.phase[0] if time.monotonic() - self.phase[1] < 2.0 else "-"
@@ -548,8 +577,9 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                 ),
             ]
             out = self.painter.render(
-                bgr, cands, p, tracks, self.labels, header, score_cands=scored, box_no=self.box_no
-            )
+                bgr, cands, p, tracks, self.labels, header, score_cands=scored,
+                box_no=self.box_no, score=score,
+            )  # fmt: skip
             if args.out:
                 if self.writer is None:
                     self.writer = cv2.VideoWriter(str(args.out), cv2.VideoWriter_fourcc(*"mp4v"),

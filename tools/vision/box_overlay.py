@@ -13,7 +13,7 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
 
 화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `BOX<번호> <채움 %>`(+ OCR 결과). 번호 = sort_manager box_id 끝 순번
 (`/voss/sort/state`·`/voss/sort/result` 의 box_id ↔ track_id, OCR 판정 때 발급) — 아직 없으면 번호 없이 `BOX`. 번호는 지금
-세션 것만(새 start 면 버림, box_tracker 재시작으로 같은 track_id 가 다시 나와도 버림). 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+세션 것만(새 start 면 버림, 트랙이 새로 나타나면 — box_tracker 재시작으로 같은 track_id 가 다시 쓰여도 — 버림). 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
 채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
 학습 모델의 신뢰도가 아니라 seg 판정값이다. 짝이 없으면 `-%`, 실시간 --no-score 면 % 를 안 쓴다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
@@ -57,7 +57,8 @@ NAME = {"": "통과", "border": "가장자리", "aspect": "비율", "fill": "채
 TRACK = (0, 230, 0)
 ANGLE = (0, 230, 255)  # 노랑 — 각도만 (의석 제안 10/14: bbox·글자는 초록, 각도는 노랑)
 MATCH_PX = 40  # 트랙 중심과 송장 후보 중심이 이 안이면 같은 박스
-GONE_NS = 5_000_000_000  # 이만큼 안 보이다 다시 나온 track_id 는 다른 박스(box_tracker 재시작)
+# 이만큼 안 보이다 다시 나온 track_id 는 새 트랙 — box_tracker 는 max_missed 15 프레임(0.5 s) 못 본 트랙을 지운다
+NEW_GAP_NS = 600_000_000
 FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
@@ -99,8 +100,10 @@ def box_seq(box_id: str) -> int | None:
 
 
 class BoxNumbers:
-    """track_id → sort_manager 순번. 번호는 지금 세션 것만 쓴다 — 세션이 바뀌면(새 start) 앞 세션 번호를 버리고,
-    같은 track_id 가 GONE_NS 넘게 안 보이다 다시 나오면(box_tracker 재시작으로 id 가 1 부터 다시) 그 번호도 버린다."""
+    """track_id → sort_manager 순번. 번호는 지금 세션 것만 쓴다 — 세션이 바뀌면(새 start) 앞 세션 번호를 버린다.
+    트랙이 새로 나타나면(처음 보거나 NEW_GAP_NS 넘게 안 보이다) 그 track_id 에 남은 번호도 버린다. 번호는 트랙이 보이는
+    동안 OCR 판정으로 발급되므로, 새로 나타난 트랙이 가진 번호는 앞 트랙 것이다(box_tracker 재시작으로 id 가 1 부터 다시 —
+    재시작이 얼마나 빠르든). 지금 처리 중인 박스는 SortState(0.4 s 주기)가 곧 다시 붙인다(가려졌다 나온 PICKING 트랙)."""
 
     def __init__(self) -> None:
         self.session = ""
@@ -121,7 +124,7 @@ class BoxNumbers:
         """이 촬영 시각에 발행된 track_id 들."""
         for tid in ids:
             last = self.seen.get(tid)
-            if last is not None and t_ns - last > GONE_NS:
+            if last is None or t_ns - last > NEW_GAP_NS:
                 self.no.pop(tid, None)
             self.seen[tid] = t_ns
 
@@ -516,6 +519,8 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.painter = Painter(args.scale)
             self.writer = None
             self.frames = 0
+            self.n_box = self.n_sync = 0  # 박스가 보일 때 그린 프레임 / 그중 BoxTrack 과 같은 시각
+            self.lag_ms: list[float] = []  # 그린 영상이 최신 영상보다 늦은 정도
             self.quit = False
             self.create_subscription(CompressedImage if self.compressed else Image, topic,
                                      lambda m: self.images.append(m), be)  # fmt: skip
@@ -559,6 +564,11 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                 (m for m in self.images if ns(m.header.stamp) == self.last_box_t), self.images[-1]
             )
             t = ns(msg.header.stamp)
+            newest = ns(self.images[-1].header.stamp)
+            if self.last_box_t and newest - self.last_box_t < 1_000_000_000:
+                self.n_box += 1
+                self.n_sync += t == self.last_box_t
+                self.lag_ms.append((newest - t) / 1e6)
             bgr = decode(msg, self.compressed)
             # 채움 % 를 내려면 같은 판정이 필요하다 — 후보 사각형은 --candidates 일 때만 그린다
             score = args.candidates or not args.no_score
@@ -602,6 +612,11 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
         if node.writer is not None:
             node.writer.release()
             print(f"저장 {args.out} ({node.frames}프레임)")
+        if node.n_box:
+            lag = np.asarray(node.lag_ms)
+            print(f"그린 프레임 {node.frames}, 박스가 보일 때 {node.n_box} 중 BoxTrack 과 같은 촬영 시각 "
+                  f"{node.n_sync} ({100 * node.n_sync / node.n_box:.0f} %), 최신 영상보다 늦음 "
+                  f"중앙 {np.median(lag):.0f} ms · 최대 {lag.max():.0f} ms")  # fmt: skip
         cv2.destroyAllWindows()
         node.destroy_node()
         rclpy.try_shutdown()

@@ -56,13 +56,13 @@ def _gateway(context):
         )
     )
     zone_vel = LaunchConfiguration("zone_vel_mm_s").perform(context)
-    if zone_vel:  # MoveToZone 선속도(launch 기본 450). 빈 값(zone_vel_mm_s:="")이면 노드 기본값(100 mm/s, 45 deg/s)
+    if zone_vel:  # MoveToZone 선속도(기본 450). 빈 값이면 노드 기본(100 mm/s, 45 deg/s)
         params["zone_vel"] = [float(zone_vel), 45.0]
     blend = LaunchConfiguration("zone_blend_mm").perform(context)
-    if blend:  # 위쪽 모서리 블렌딩 거리 mm(launch 기본 30). 빈 값이면 노드 기본 0(모서리마다 멈춤)
+    if blend:  # 위쪽 모서리 블렌딩 mm(기본 30). 빈 값이면 노드 기본 0(모서리마다 멈춤)
         params["zone_blend_mm"] = float(blend)
     zone_acc = LaunchConfiguration("zone_acc_mm_s2").perform(context)
-    if zone_acc:  # MoveToZone 선가속도(launch 기본 900). 빈 값이면 노드 기본값(200 mm/s², 90 deg/s²)
+    if zone_acc:  # MoveToZone 선가속도(기본 900). 빈 값이면 노드 기본(200 mm/s², 90 deg/s²)
         params["zone_acc"] = [float(zone_acc), 90.0]
     return [
         Node(
@@ -80,7 +80,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument("dry_run", default_value="true"),
             DeclareLaunchArgument("servo_z_min_mm", default_value=""),
-            # 실기 검증 값(10/12 17:02~·10/13 게이트 450/900/30) — 인자를 빼먹어도 같은 속도로 뜨게(10/14 통합이 100 으로 떴음)
+            # 실기 값(10/12 저녁·10/13 게이트) — 인자를 빼도 같은 속도(10/14 통합이 100 으로 떴음)
             DeclareLaunchArgument("zone_vel_mm_s", default_value="450"),
             DeclareLaunchArgument("zone_acc_mm_s2", default_value="900"),
             DeclareLaunchArgument("zone_blend_mm", default_value="30"),

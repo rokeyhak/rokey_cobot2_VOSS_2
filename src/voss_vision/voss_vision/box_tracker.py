@@ -31,6 +31,7 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
+from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 
 from voss_msgs.msg import BoxTrack, LabelCrop, SortState
@@ -48,7 +49,8 @@ QOS_POSE = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 QOS_IMAGE = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 SEG_KEYS = ("downscale", "v_min", "s_max", "close_px", "area_min", "area_max", "aspect_tol",
-            "fill_min", "border_px", "belt_green_frac", "belt_margin_px")  # fmt: skip
+            "fill_min", "border_px", "belt_green_frac", "belt_margin_px", "belt_roi",
+            "belt_min_area_frac")  # fmt: skip
 HOMO_HE_WARN_MM = 3.0  # 관측 자세에서 두 방식 차이가 이보다 크면 경고 (calibration.md)
 SRC_NAME = {
     BoxTrack.SOURCE_NONE: "none",
@@ -113,6 +115,8 @@ class BoxTrackerNode(Node):
         )
         self.playback = p("playback", "").value
         self.playback_rate = float(p("playback_rate", 1.0).value)
+        # 재생 시각을 지금 시계로 옮긴다 — 재생으로 sort_manager·belt_servo 를 돌릴 때(voss_dry_run). 기본은 녹화 시각 보존
+        self.playback_restamp = bool(p("playback_restamp", False).value)
         self.assume_observe = bool(p("assume_observe", bool(self.playback)).value)
         self.pose_max_gap = float(p("pose_max_gap_s", 0.04).value)
         # /voss/robot/pose stamp 는 실제 로봇 상태보다 늦다(10/08 약 60 ms) → 촬영 시각 + lag 의 pose 를 쓴다.
@@ -202,6 +206,7 @@ class BoxTrackerNode(Node):
             f"hand_eye={self._he_label()} pose_lag={self.pose_lag * 1000:.0f} ms "
             f"observe_source={self.observe_source} "
             f"input={'playback ' + self.playback if self.playback else image_topic}"
+            f"{' (restamp)' if self.playback and self.playback_restamp else ''}"
         )
 
     def _he_label(self) -> str:
@@ -258,12 +263,16 @@ class BoxTrackerNode(Node):
                     rosbag2_py.ConverterOptions("", ""))  # fmt: skip
         types = {t.name: t.type for t in reader.get_all_topics_and_types()}
         t_wall0 = t_bag0 = None
+        clock = tl.PlaybackClock(self.playback_rate) if self.playback_restamp else None
         n = 0
         while rclpy.ok() and not self.stopping and reader.has_next():
             topic, data, t_bag = reader.read_next()
             kind = types.get(topic, "")
             if kind == "geometry_msgs/msg/PoseStamped" and topic.endswith("/voss/robot/pose"):
-                self._on_pose(deserialize_message(data, PoseStamped))
+                pm = deserialize_message(data, PoseStamped)
+                if clock is not None:
+                    pm.header.stamp = self._restamp(clock, pm.header.stamp)
+                self._on_pose(pm)
                 continue
             if kind == "sensor_msgs/msg/CameraInfo":
                 self._on_info(deserialize_message(data, CameraInfo))
@@ -281,11 +290,16 @@ class BoxTrackerNode(Node):
             wait = (t_bag - t_bag0) * 1e-9 / self.playback_rate - (time.monotonic() - t_wall0)
             if wait > 0:
                 time.sleep(wait)
-            self.process(img, m.header.stamp, live=False)
+            stamp = self._restamp(clock, m.header.stamp) if clock is not None else m.header.stamp
+            self.process(img, stamp, live=False)
             n += 1
         self.get_logger().info(f"재생 끝: 영상 {n} 프레임 ({self.playback})")
         self._log_stats()
         self.done = True
+
+    def _restamp(self, clock: tl.PlaybackClock, stamp):
+        now = self.get_clock().now().nanoseconds * 1e-9
+        return Time(nanoseconds=int(clock(stamp_s(stamp), now) * 1e9)).to_msg()
 
     # ---------------- 처리 ----------------
     def process(self, bgr: np.ndarray, stamp, live: bool) -> None:
@@ -305,7 +319,7 @@ class BoxTrackerNode(Node):
                 bbox=[int(b) for b in t.bbox],
                 stamp=stamp,
             )
-            self._fill_position(m, t.u, t.v, pose_t, at_obs)
+            self._fill_position(m, t.u, t.v, pose_t, at_obs, t.half_axis)
             self.pub_box.publish(m)
             with self._stats_lock:
                 self.stats.add_box(SRC_NAME[m.position_source], m.position_valid)
@@ -340,17 +354,26 @@ class BoxTrackerNode(Node):
         )
         return t, at_obs
 
-    def _fill_position(self, m: BoxTrack, u: float, v: float, pose_t, at_obs: bool) -> None:
-        he_xyz = None
+    def _fill_position(
+        self, m: BoxTrack, u: float, v: float, pose_t, at_obs: bool, half_axis=None
+    ) -> None:
+        # 중심 + (yaw 용) 송장 긴 변 양 끝을 같은 변환으로 한 번에 옮긴다 (S2-T16, voss_msgs.md BoxTrack)
+        px = [[u, v]]
+        if half_axis is not None:
+            hx, hy = half_axis
+            px += [[u - hx, v - hy], [u + hx, v + hy]]
+        he_xyz, he_ends = None, None
         if pose_t is not None and self.he is not None and self.plane_z is not None:
-            xyz, ok = pixel_to_plane(
-                pose_t @ self.he_T, self.he_k, self.he_d, [[u, v]], self.plane_z
-            )
+            xyz, ok = pixel_to_plane(pose_t @ self.he_T, self.he_k, self.he_d, px, self.plane_z)
             he_xyz = xyz[0] if ok[0] else None
-        homo_xyz, inside = None, False
+            if len(px) == 3 and ok[1] and ok[2]:
+                he_ends = (xyz[1], xyz[2])
+        homo_xyz, homo_ends, inside = None, None, False
         if pose_t is not None and at_obs and self.homo:
-            xy, ok = pixel_to_base_xy(self.homo, np.array([[u, v]], float))
+            xy, ok = pixel_to_base_xy(self.homo, np.array(px, float))
             homo_xyz, inside = (float(xy[0, 0]), float(xy[0, 1]), self.plane_z), bool(ok[0])
+            if len(px) == 3 and ok[1] and ok[2]:
+                homo_ends = (xy[1], xy[2])
             # 관측 자세에서 두 방식 차이를 로그로 남긴다(calibration.md). 유효 영역 밖은 외삽이라 비교하지 않는다
             if he_xyz is not None and inside:
                 d = float(np.hypot(he_xyz[0] - homo_xyz[0], he_xyz[1] - homo_xyz[1]))
@@ -361,6 +384,7 @@ class BoxTrackerNode(Node):
             he_xyz, self.he_ok, self.he_verified if self.he else False, self.observe_source,
         )  # fmt: skip
         m.position_source, m.position_valid = src, valid
+        m.yaw_base, m.yaw_valid = tl.choose_yaw(src, valid, he_ends, homo_ends)
         if xyz is not None:
             m.position_base.x, m.position_base.y, m.position_base.z = (c / 1000.0 for c in xyz)
         if src == BoxTrack.SOURCE_OBSERVE_HOMOGRAPHY:

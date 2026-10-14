@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { INITIAL_INDICATOR, reduceVoiceIndicator as reduce, parseVoiceSignal, VOICE_COMMAND_TIMEOUT_MS } from '../src/lib/voiceIndicator.ts';
+import { INITIAL_INDICATOR, reduceVoiceIndicator as reduce, parseVoiceSignal, VOICE_COMMAND_TIMEOUT_MS, VOICE_FAILURE_DISPLAY_MS } from '../src/lib/voiceIndicator.ts';
 const event = (phase, utterance_id='u1', event_id=`${utterance_id}-${phase}`) => ({ type:'VOICE_EVENT', signal:{phase, utterance_id, event_id} });
 const wake = () => reduce(INITIAL_INDICATOR, event('WAKE_DETECTED'));
 test('호출어 수신 → 노랑',()=>assert.equal(wake().color,'yellow'));
@@ -10,6 +10,15 @@ test('시간 초과 → 빨강 및 시간 초과 안내 상태',()=>{
  assert.equal(VOICE_COMMAND_TIMEOUT_MS,8000);
  assert.equal(reduce(wake(),{type:'UI_TIMEOUT',utteranceId:'u1'}).failure,'timeout');
  assert.equal(reduce(wake(),event('TIMED_OUT')).color,'red');
+});
+test('빨강은 3초 뒤 초록으로 복귀하고 지난 발화 이벤트를 무시',()=>{
+ assert.equal(VOICE_FAILURE_DISPLAY_MS,3000);
+ let state=reduce(wake(),event('RECOGNITION_FAILED'));
+ state=reduce(state,{type:'UI_RECOVER',utteranceId:'u1'});
+ assert.equal(state.color,'green'); assert.equal(state.failure,null);
+ assert.equal(reduce(state,event('WAKE_DETECTED','u1','retry-wake')).color,'green');
+ const next=reduce(state,event('WAKE_DETECTED','u2'));
+ assert.strictEqual(reduce(next,{type:'UI_RECOVER',utteranceId:'u1'}),next);
 });
 test('아이콘 초기화 뒤 늦은 결과·재호출어는 무시',()=>{
  let state=reduce(wake(),{type:'RESET'});

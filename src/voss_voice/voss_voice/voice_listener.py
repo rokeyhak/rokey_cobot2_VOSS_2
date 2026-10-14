@@ -46,7 +46,7 @@ class VoiceListenerNode(Node):
         p("stt_timeout_s", 5.0)
         p("device", "")  # sounddevice 장치 이름·번호, "" = 기본
         p("vad_threshold_db", -40.0)
-        p("end_silence_ms", 700)
+        p("end_silence_ms", 350)
         p("timeout_say_min_interval_s", 30.0)  # TIMED_OUT 음성 안내 최소 간격
 
         publish_transcript = bool(self.get_parameter("publish_transcript").value)

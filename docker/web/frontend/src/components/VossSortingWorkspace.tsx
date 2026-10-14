@@ -17,7 +17,7 @@ import {
   toScreen,
 } from '../lib/workspaceGeometry';
 import type { ZoneId, ZoneLayout } from '../lib/workspaceGeometry';
-import { INITIAL_INDICATOR, VOICE_COMMAND_TIMEOUT_MS, reduceVoiceIndicator } from '../lib/voiceIndicator';
+import { INITIAL_INDICATOR, VOICE_COMMAND_TIMEOUT_MS, VOICE_FAILURE_DISPLAY_MS, reduceVoiceIndicator } from '../lib/voiceIndicator';
 import type { VoiceSignal } from '../lib/voiceIndicator';
 import type { BoxMotionSample, BoxTrackSample, Point3, RobotPoseSample } from '../lib/workspacePosition';
 import { boxTopFromTcp, parseBoxMotion, parseBoxTrack, parseRobotPose, POSE_STALE_MS, TRACK_STALE_MS } from '../lib/workspacePosition';
@@ -378,6 +378,15 @@ export function VossSortingWorkspace({ state, robot, boxTracks = [], robotPose =
     return () => window.clearTimeout(timeout);
   }, [voiceIndicator.color, voiceIndicator.activeUtteranceId]);
 
+  useEffect(() => {
+    if (voiceIndicator.color !== 'red') return;
+    const activeId = voiceIndicator.activeUtteranceId;
+    const timer = window.setTimeout(() => {
+      dispatchVoice({ type: 'UI_RECOVER', utteranceId: activeId });
+    }, VOICE_FAILURE_DISPLAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [voiceIndicator.color, voiceIndicator.activeUtteranceId]);
+
   const rawState = demoActive ? demoPhase : isStateFresh ? (state?.state ?? 'UNKNOWN') : 'UNKNOWN';
   // SortState.track_id는 좌표가 아니다. 위치 스트림 승인 전 LIVE 박스를 추정 생성하지 않는다.
   const previewBox = demoActive && rawState === 'RUNNING';
@@ -530,7 +539,7 @@ export function VossSortingWorkspace({ state, robot, boxTracks = [], robotPose =
             {voiceIndicator.failure === 'timeout'
               ? '시간이 지났어요. 다시 “헬로 로키”라고 말해 주세요.'
               : '음성을 인식하지 못했어요. 다시 “헬로 로키”라고 말해 주세요.'}
-            <span>아이콘을 누르면 초록색으로 초기화됩니다.</span>
+            <span>3초 후 대기 상태로 돌아갑니다.</span>
           </div>
         ) : null}
       </div>

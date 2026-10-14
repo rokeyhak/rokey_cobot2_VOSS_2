@@ -59,6 +59,10 @@ ANGLE = (0, 230, 255)  # 노랑 — 각도만 (의석 제안 10/14: bbox·글자
 MATCH_PX = 40  # 트랙 중심과 송장 후보 중심이 이 안이면 같은 박스
 # 이만큼 안 보이다 다시 나온 track_id 는 새 트랙 — box_tracker 는 max_missed 15 프레임(0.5 s) 못 본 트랙을 지운다
 NEW_GAP_NS = 600_000_000
+# 그보다 짧게 끊겼다 나온 같은 track_id 는 앞 관측의 속도로 예측한 자리에서 이만큼 벗어나면 다른 박스(빠른 재시작).
+# 끊김이 이보다 짧으면(3 프레임 안) 보지 않는다 — 그리퍼 카메라가 움직이는 동안의 큰 픽셀 이동으로 잘못 버리지 않게
+JUMP_PX = 80
+JUMP_MIN_GAP_NS = 100_000_000
 FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
@@ -101,14 +105,23 @@ def box_seq(box_id: str) -> int | None:
 
 class BoxNumbers:
     """track_id → sort_manager 순번. 번호는 지금 세션 것만 쓴다 — 세션이 바뀌면(새 start) 앞 세션 번호를 버린다.
-    트랙이 새로 나타나면(처음 보거나 NEW_GAP_NS 넘게 안 보이다) 그 track_id 에 남은 번호도 버린다. 번호는 트랙이 보이는
-    동안 OCR 판정으로 발급되므로, 새로 나타난 트랙이 가진 번호는 앞 트랙 것이다(box_tracker 재시작으로 id 가 1 부터 다시 —
-    재시작이 얼마나 빠르든). 지금 처리 중인 박스는 SortState(0.4 s 주기)가 곧 다시 붙인다(가려졌다 나온 PICKING 트랙)."""
+
+    box_tracker 를 다시 띄우면 track_id 가 1 부터 다시 매겨져 앞 박스 번호가 새 박스에 붙을 수 있다(#49 리뷰). 번호는
+    트랙이 보이는 동안 OCR 판정으로 발급되므로, 새 트랙이 가진 번호는 앞 트랙 것이다 — 그래서 아래 경우 번호를 버린다.
+    - restart(): box_tracker 가 바뀌었다(실시간: /voss/vision/box 발행자 GID 가 바뀜) → 전부. 재시작 간격과 무관
+    - 처음 보거나 NEW_GAP_NS 넘게 안 보이다 나온 track_id (tracker 가 이미 지웠을 트랙)
+    - JUMP_MIN_GAP_NS~NEW_GAP_NS 끊겼다 나왔는데 예측 자리에서 JUMP_PX 넘게 벗어난 track_id (녹화 재생의 빠른 재시작)
+    지금 처리 중인 박스는 SortState(0.4 s 주기)가 곧 다시 붙인다(가려졌다 나온 PICKING 트랙)."""
 
     def __init__(self) -> None:
         self.session = ""
         self.no: dict[int, int] = {}
-        self.seen: dict[int, int] = {}  # track_id → 마지막으로 보인 촬영 시각 ns
+        self.seen: dict[int, tuple] = {}  # track_id → (촬영 시각 ns, u, v, du/ns, dv/ns)
+
+    def restart(self) -> None:
+        """box_tracker 가 바뀌었다 — 모든 track_id 의 번호와 관측을 버린다."""
+        self.no.clear()
+        self.seen.clear()
 
     def sort_msg(self, box_id: str, track_id: int, session_id: str = "") -> None:
         """SortState·SortResult 한 건. session_id 가 없는 옛 빌드는 box_id 앞부분(`<session_id>-`)으로 안다."""
@@ -120,13 +133,21 @@ class BoxNumbers:
         if seq is not None and track_id >= 0:
             self.no[track_id] = seq
 
-    def tracks(self, t_ns: int, ids) -> None:
-        """이 촬영 시각에 발행된 track_id 들."""
-        for tid in ids:
-            last = self.seen.get(tid)
-            if last is None or t_ns - last > NEW_GAP_NS:
+    def tracks(self, t_ns: int, tracks) -> None:
+        """이 촬영 시각에 발행된 트랙들(track_id·u·v)."""
+        for t in tracks:
+            tid, last = t.track_id, self.seen.get(t.track_id)
+            du = dv = 0.0
+            if last is None or t_ns - last[0] > NEW_GAP_NS:
                 self.no.pop(tid, None)
-            self.seen[tid] = t_ns
+            else:
+                dt = t_ns - last[0]
+                miss = np.hypot(t.u - (last[1] + last[3] * dt), t.v - (last[2] + last[4] * dt))
+                if dt > JUMP_MIN_GAP_NS and miss > JUMP_PX:
+                    self.no.pop(tid, None)
+                elif dt > 0:
+                    du, dv = (t.u - last[1]) / dt, (t.v - last[2]) / dt
+            self.seen[tid] = (t_ns, t.u, t.v, du, dv)
 
     def label(self, track_id: int) -> str:
         """초록 글자의 앞부분 — sort_manager 순번이 있으면 BOX7, 아직 없으면(판독 전·manager 없음) BOX."""
@@ -451,7 +472,7 @@ def run_bag(args, p: SegParams, plane_z: float) -> None:
         while n_num < len(numbering.t) and numbering.t[n_num] <= t_recv:
             box_no.sort_msg(*numbering.v[n_num])
             n_num += 1
-        box_no.tracks(t_cam, ids)
+        box_no.tracks(t_cam, tracks)
         out = painter.render(
             bgr, cands, p, tracks, latest_labels(labels, t_recv), header, box_no=box_no
         )
@@ -513,6 +534,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.last_box_t = 0
             self.labels: dict[int, LabelRead] = {}
             self.box_no = BoxNumbers()
+            self.box_pubs: set[bytes] = set()  # box 발행자 GID — 바뀌면 tracker 재시작
             self.pose_z = None
             self.state = ("-", -1)
             self.phase = ("-", 0.0)
@@ -535,6 +557,7 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.create_subscription(TrackAndGrasp.Impl.FeedbackMessage, T_FB,
                                      lambda m: setattr(self, "phase", (m.feedback.phase, time.monotonic())), be)  # fmt: skip
             self.create_timer(1.0 / args.hz, self.tick)
+            self.create_timer(0.1, self.check_tracker)
             self.get_logger().info(
                 f"{topic} 구독, {args.hz} Hz 그리기, 후보 {'표시' if args.candidates else '끔'}, "
                 f"채움 % {'끔' if args.no_score and not args.candidates else '표시'} — q 로 끝"
@@ -548,10 +571,22 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             self.state = (m.state, m.track_id)
             self.on_numbered(m)
 
+        def check_tracker(self) -> None:
+            """box_tracker 가 다시 떴으면(발행자 GID 가 바뀜) 번호를 모두 버린다. 발행자가 없는 동안은 앞 값을 둔다."""
+            gids = {bytes(i.endpoint_gid) for i in self.get_publishers_info_by_topic(T_BOX)}
+            if gids and gids != self.box_pubs:
+                if self.box_pubs:
+                    self.get_logger().info("box_tracker 가 바뀜(발행자 GID) — BOX 번호를 모두 버림")
+                    self.box_no.restart()
+                self.box_pubs = gids
+
         def on_box(self, m: BoxTrack) -> None:
             t = ns(m.stamp)
+            last = self.box_no.seen.get(m.track_id)
+            if m.track_id in self.box_no.no and (last is None or t - last[0] > JUMP_MIN_GAP_NS):
+                self.check_tracker()  # 번호 있는 트랙이 끊겼다 나오면 타이머(0.1 s)를 기다리지 않고 바로 확인
             self.boxes.setdefault(t, []).append(m)
-            self.box_no.tracks(t, (m.track_id,))
+            self.box_no.tracks(t, (m,))
             self.last_box_t = max(self.last_box_t, t)
             for old in [k for k in self.boxes if k < t - 1_000_000_000]:
                 del self.boxes[old]

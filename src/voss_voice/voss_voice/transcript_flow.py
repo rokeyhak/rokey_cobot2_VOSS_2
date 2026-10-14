@@ -17,6 +17,7 @@ from voss_voice.intent_logic import (
     SAY_RETRY,
     SayDeduper,
     ZoneMapView,
+    command_acknowledgement,
     decide,
     decide_bare_dong,
     decide_destination_answer,
@@ -69,7 +70,9 @@ class TranscriptFlow:
 
         # 1. 정지 명령은 LLM이나 잠금을 기다리지 않는다.
         if is_stop(text):
-            self._publish(stop_decision(text).intent)
+            intent = stop_decision(text).intent
+            self._publish(intent)
+            self._say(command_acknowledgement(intent))
             return "stop", 1000 * (self._clock() - t0)
 
         # 2. 다른 지시를 처리 중이면 기다리지 않고 안내한다.
@@ -130,6 +133,7 @@ class TranscriptFlow:
             # 6. 최종 판단 결과에 따라 발행하거나 답한다.
             if d.kind == "publish":
                 self._publish(d.intent)
+                self._say(command_acknowledgement(d.intent))
 
             elif d.kind == "query":
                 self._say(

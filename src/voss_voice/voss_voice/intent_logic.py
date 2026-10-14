@@ -147,6 +147,27 @@ def stop_decision(raw_text: str) -> Decision:
     return Decision("publish", intent=_intent("stop", raw_text=raw_text))
 
 
+def command_acknowledgement(intent: dict) -> str:
+    """접수한 명령만 안내한다. 로봇 동작 완료를 뜻하지 않는다."""
+    kind = intent["type"]
+    if kind == "start":
+        return "분류를 시작하겠습니다."
+    if kind == "stop":
+        # 음성이 마이크로 되돌아와도 호출어 없는 정지로 재인식되지 않도록 정지 동사를 피한다.
+        return "요청을 처리하겠습니다."
+    if kind == "resume":
+        return "분류를 재개하겠습니다."
+    if kind == "priority":
+        return f"{intent['dong']}을 우선 분류하겠습니다."
+    if kind == "answer":
+        return "보류로 처리하겠습니다." if intent.get("zone") == HOLD else f"{intent['dong']}으로 분류하겠습니다."
+    if kind == "recheck":
+        return "재확인을 시작하겠습니다."
+    if kind == "palletize":
+        return "말씀하신 순서로 적재하겠습니다."
+    return ""
+
+
 def _intent(
     t: str,
     dong: str = "",

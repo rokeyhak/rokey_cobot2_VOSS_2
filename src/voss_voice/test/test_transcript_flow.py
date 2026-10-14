@@ -67,7 +67,7 @@ def test_llm_calls_are_serialized():
     # 한 번에 하나만 LLM 을 부르고, 그사이 온 발화는 기다리지 않고 "처리 중" 으로 돌려보낸다
     assert peak[0] == 1
     assert sorted(kinds) == ["busy", "busy", "publish"] and len(published) == 1
-    assert said == [SAY_BUSY]  # 같은 문장은 3 초 중복 억제
+    assert said == [SAY_BUSY, "분류를 시작하겠습니다."]  # busy 안내는 중복 억제
 
 
 def test_busy_utterances_do_not_hold_threads():
@@ -104,7 +104,7 @@ def test_stop_works_even_when_ai_down_and_no_zone_map():
     assert f.handle("정지")[0] == "stop" and published[0]["type"] == "stop"
 
 
-def test_stop_publishes_without_waiting_or_speaking():
+def test_stop_publishes_before_speaking():
     events = []
     f = TranscriptFlow(
         post_intent=lambda *_: pytest.fail("stop must not call LLM"),
@@ -113,7 +113,14 @@ def test_stop_publishes_without_waiting_or_speaking():
         say=lambda phrase: events.append(("say", phrase)),
     )
     assert f.handle("멈춰")[0] == "stop"
-    assert events == [("publish", "stop")]
+    assert events == [("publish", "stop"), ("say", "요청을 처리하겠습니다.")]
+
+
+def test_command_acknowledgement_follows_intent():
+    f, published, said = _flow(lambda *_: {"type": "start"})
+    assert f.handle("분류 시작해")[0] == "publish"
+    assert published[0]["type"] == "start"
+    assert said == ["분류를 시작하겠습니다."]
 
 
 def test_answer_uses_state_at_utterance_time():
@@ -279,7 +286,7 @@ def test_destination_variations_do_not_call_llm(text: str, dong: str) -> None:
     result_kind, _ = flow.handle(text)
 
     assert result_kind == "publish"
-    assert len(published) == 1 and spoken == []
+    assert len(published) == 1 and spoken == [f"{dong}으로 분류하겠습니다."]
     assert published[0]["type"] == "answer"
     assert published[0]["dong"] == dong
     assert published[0]["raw_text"] == text
@@ -309,7 +316,7 @@ def test_palletize_route_is_published_in_spoken_order():
         lambda text, allowed: {"type": "palletize", "route": ["대치동", "역삼"]}
     )
     kind, _ = f.handle("대치, 역삼 순서로 실어줘")
-    assert kind == "publish" and not said
+    assert kind == "publish" and said == ["말씀하신 순서로 적재하겠습니다."]
     assert published[0]["type"] == "palletize" and published[0]["route"] == ["대치동", "역삼동"]
 
 

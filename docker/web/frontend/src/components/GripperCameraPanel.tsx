@@ -17,7 +17,7 @@ export function GripperCameraPanel() {
         const response = await fetch('/camera/gripper/frame.jpg', { cache: 'no-store', signal: controller.signal });
         if (response.status === 502 || response.status === 504) throw new Error('Nodes PC의 8091 카메라 송출에 연결할 수 없습니다. camera_preview 실행을 확인해 주세요.');
         if (response.status === 503) throw new Error('Nodes PC에서 새 카메라 프레임을 기다리는 중입니다.');
-        if (response.status === 403) throw new Error('그리퍼 영상은 Web PC의 localhost 화면에서만 볼 수 있습니다.');
+        if (response.status === 403) throw new Error('그리퍼 영상 접근이 거부되었습니다.');
         if (!response.ok || !response.headers.get('content-type')?.startsWith('image/jpeg')) throw new Error('그리퍼 영상 응답을 확인할 수 없습니다.');
         const blob = await response.blob();
         if (!active) return;

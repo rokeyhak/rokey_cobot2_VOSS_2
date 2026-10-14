@@ -1,4 +1,5 @@
 """Read-only JPEG preview for the Web PC, using existing image and BoxTrack topics."""
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
@@ -8,6 +9,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
+
 from voss_msgs.msg import BoxTrack
 from voss_vision.camera_frames import CameraFrames
 
@@ -17,11 +19,11 @@ def stamp_key(stamp):
 
 
 def render_jpeg(message, boxes):
-    if message.encoding not in ('rgb8', 'bgr8'):
-        raise ValueError('Preview requires rgb8 or bgr8')
+    if message.encoding not in ("rgb8", "bgr8"):
+        raise ValueError("Preview requires rgb8 or bgr8")
     frame = np.frombuffer(message.data, dtype=np.uint8).reshape(message.height, message.step)
-    frame = frame[:, :message.width * 3].reshape(message.height, message.width, 3).copy()
-    if message.encoding == 'rgb8':
+    frame = frame[:, : message.width * 3].reshape(message.height, message.width, 3).copy()
+    if message.encoding == "rgb8":
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     for track_id, (x, y, w, h) in boxes.items():
         left, top = max(0, x), max(0, y)
@@ -29,45 +31,52 @@ def render_jpeg(message, boxes):
         if w <= 0 or h <= 0 or right <= left or bottom <= top:
             continue
         cv2.rectangle(frame, (left, top), (right, bottom), (70, 230, 100), 2)
-        cv2.putText(frame, f'BOX {track_id}', (left, max(16, top - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (70, 230, 100), 2)
-    ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        cv2.putText(
+            frame,
+            f"BOX {track_id}",
+            (left, max(16, top - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (70, 230, 100),
+            2,
+        )
+    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     if not ok:
-        raise ValueError('JPEG encoding failed')
+        raise ValueError("JPEG encoding failed")
     return jpeg.tobytes()
 
 
 class CameraPreview(Node):
     def __init__(self):
-        super().__init__('camera_preview')
+        super().__init__("camera_preview")
         self.frames = CameraFrames()
-        image_topic = self.declare_parameter('image_topic', '/camera/color/image_raw').value
-        box_topic = self.declare_parameter('box_topic', '/voss/vision/box').value
-        host = self.declare_parameter('host', '127.0.0.1').value
-        port = self.declare_parameter('port', 8091).value
+        image_topic = self.declare_parameter("image_topic", "/camera/color/image_raw").value
+        box_topic = self.declare_parameter("box_topic", "/voss/vision/box").value
+        host = self.declare_parameter("host", "127.0.0.1").value
+        port = self.declare_parameter("port", 8091).value
         self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
         self.create_subscription(BoxTrack, box_topic, self.on_box, qos_profile_sensor_data)
         frames = self.frames
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                if self.path.split('?')[0] != '/frame.jpg':
+                if self.path.split("?")[0] != "/frame.jpg":
                     self.send_error(404)
                     return
                 snapshot = frames.snapshot()
                 if snapshot is None:
-                    self.send_error(503, 'No fresh camera frame')
+                    self.send_error(503, "No fresh camera frame")
                     return
                 try:
                     body = render_jpeg(*snapshot)
                 except (ValueError, cv2.error):
-                    self.send_error(503, 'Camera frame cannot be decoded')
+                    self.send_error(503, "Camera frame cannot be decoded")
                     return
                 try:
                     self.send_response(200)
-                    self.send_header('Content-Type', 'image/jpeg')
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
                     self.end_headers()
                     self.wfile.write(body)
                 except (BrokenPipeError, ConnectionResetError):
@@ -79,7 +88,7 @@ class CameraPreview(Node):
         self.server = ThreadingHTTPServer((host, port), Handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        self.get_logger().info(f'Camera preview: http://{host}:{port}/frame.jpg')
+        self.get_logger().info(f"Camera preview: http://{host}:{port}/frame.jpg")
 
     def on_image(self, message):
         self.frames.add_frame(stamp_key(message.header.stamp), message)

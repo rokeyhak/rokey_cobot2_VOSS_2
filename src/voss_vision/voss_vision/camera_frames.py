@@ -1,7 +1,8 @@
 """Bounded, timestamp-matched preview storage. No ROS dependencies."""
+
+import time
 from collections import OrderedDict
 from threading import Lock
-import time
 
 
 class CameraFrames:

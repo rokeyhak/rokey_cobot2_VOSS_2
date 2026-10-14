@@ -11,11 +11,11 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
 실시간 — 공용 PC, 10/11 통합부터. 게이트 측정 중에는 띄우지 않는다(영상 구독이 하나 더 붙어 부하가 는다):
   python3 tools/vision/box_overlay.py --live [--candidates] [--hz 10] [--out live.mp4]
 
-화면: 초록 = 발행된 BoxTrack bbox·track_id·채움 %·OCR 결과, 노랑 = 각도(yaw)·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+화면: 초록 = 발행된 BoxTrack bbox와 위 가운데 `box<track_id> <채움 %>`(+ OCR 결과), 노랑 = 각도 `yaw +45°`·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
 채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
 학습 모델의 신뢰도가 아니라 seg 판정값이다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
-반시계 +, (−90, 90]. 노란 선은 같은 프레임 송장 후보의 긴 축(픽셀)이라 yaw 필드가 없어도 그린다.
+반시계 +, (−90, 90], 1° 단위(벨트 기준과는 약 0.7° 차). 노란 선은 같은 프레임 송장 후보의 긴 축(픽셀)이라 yaw 필드가 없어도 그린다.
 녹화 재생은 끝에 "발행 끊김"(트랙이 사라진 프레임의 단계·높이·후보 판정)을 찍는다. CSV 는 프레임마다 같은 값.
 """
 
@@ -54,7 +54,6 @@ NAME = {"": "통과", "border": "가장자리", "aspect": "비율", "fill": "채
 TRACK = (0, 230, 0)
 ANGLE = (0, 230, 255)  # 노랑 — 각도만 (의석 제안 10/14: bbox·글자는 초록, 각도는 노랑)
 MATCH_PX = 40  # 트랙 중심과 송장 후보 중심이 이 안이면 같은 박스
-SRC = {0: "-", 1: "H", 2: "HE"}  # BoxTrack.position_source: 호모그래피·핸드아이
 FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
     "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
@@ -94,7 +93,7 @@ def yaw_text(t) -> str | None:
     if not getattr(t, "yaw_valid", False):
         return None
     d = (np.degrees(t.yaw_base) + 90.0) % 180.0 - 90.0
-    return f"yaw {90.0 if d == -90.0 else d:+.1f}° (베이스)"
+    return f"yaw {round(90.0 if d == -90.0 else d):+d}°"
 
 
 def decode(msg, compressed: bool) -> np.ndarray:
@@ -108,7 +107,7 @@ def decode(msg, compressed: bool) -> np.ndarray:
 class Painter:
     """축소한 화면에 도형을 그리고, 글자는 모아 한 번에(한글 폰트가 있으면 PIL, 없으면 OpenCV 영문)."""
 
-    def __init__(self, scale: float, font_px: int = 18) -> None:
+    def __init__(self, scale: float, font_px: int = 14) -> None:
         self.scale = scale
         self.font = None
         try:
@@ -167,12 +166,16 @@ class Painter:
                 img, (int(x * s), int(y * s)), (int((x + w) * s), int((y + h) * s)), TRACK, 2
             )
             c = match_candidate(t, cands if score_cands is None else score_cands)
-            line = f"id{t.track_id} {SRC.get(t.position_source, '?')}{'' if t.position_valid else ' 무효'}"
-            line += f"  {c.fill * 100:.0f}%" if c is not None else "  -%"
+            line = (
+                f"box{t.track_id} {c.fill * 100:.0f}%" if c is not None else f"box{t.track_id} -%"
+            )
+            if not t.position_valid:
+                line += " 무효"
             lab = labels.get(t.track_id)
             if lab is not None:
                 line += f"  {lab.code} {lab.dong} {lab.confidence:.2f}"
-            texts.append((int(x * s), max(0, int(y * s) - self.font_px - 4), line, TRACK))
+            cx_txt = int((x + w / 2) * s)  # bbox 위 가운데 정렬
+            texts.append((cx_txt, max(0, int(y * s) - self.font_px - 4), line, TRACK, True))
             if c is not None and c.rot is not None:  # 송장 긴 축 (노랑)
                 (cx, cy), (rw, rh), ang = c.rot
                 a = np.radians(ang if rw >= rh else ang + 90.0)
@@ -182,8 +185,8 @@ class Painter:
                          (int((cx + dx) * s), int((cy + dy) * s)), ANGLE, 2)  # fmt: skip
             yt = yaw_text(t)
             if yt is not None:
-                # 초록 id 줄 바로 위 — 오른쪽은 레일 후보 글자와 겹친다
-                texts.append((int(x * s), max(0, int(y * s) - 2 * (self.font_px + 4)), yt, ANGLE))
+                # 초록 줄 바로 위, 가운데 정렬 — 오른쪽은 레일 후보 글자와 겹친다
+                texts.append((cx_txt, max(0, int(y * s) - 2 * (self.font_px + 4)), yt, ANGLE, True))
         box_h = (self.font_px + 6) * len(header) + 6
         cv2.rectangle(img, (0, 0), (int(min(w_img * s, 760)), box_h), (0, 0, 0), -1)
         for i, line in enumerate(header):
@@ -191,16 +194,21 @@ class Painter:
         return self._texts(img, texts)
 
     def _texts(self, img, texts):
+        """texts: (x, y, 글자, 색[, 가운데]) — 가운데면 x 가 글자 가운데."""
         if self.font is None:
-            for x, y, t, col in texts:
+            for x, y, t, col, *center in texts:
                 ascii_t = t.encode("ascii", "replace").decode()
+                if center and center[0]:
+                    x = max(0, x - cv2.getTextSize(ascii_t, 0, self.font_px / 30, 1)[0][0] // 2)
                 cv2.putText(img, ascii_t, (x, y + self.font_px), 0, self.font_px / 30, col, 1)
             return img
         from PIL import Image, ImageDraw
 
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         d = ImageDraw.Draw(pil)
-        for x, y, t, col in texts:
+        for x, y, t, col, *center in texts:
+            if center and center[0]:
+                x = max(0, int(x - self.font.getlength(t) / 2))
             d.text((x, y), t, font=self.font, fill=(col[2], col[1], col[0]),
                    stroke_width=2, stroke_fill=(0, 0, 0))  # fmt: skip
         return cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)

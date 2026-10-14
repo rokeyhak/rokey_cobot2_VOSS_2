@@ -4,10 +4,10 @@
 // 근거: docs/interfaces/web_api.md, mqtt.md, ADR-0006. Sprint 2 S2-T08 팔레트 패널은 PalletPanel.tsx.
 import { flushSync } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { announceVoice, getResults, getSummary, issueCommand, putPlan, RequestFailure } from './api';
+import { announceVoice, getLatestPalletPlacements, getResults, getSummary, issueCommand, putPlan, RequestFailure } from './api';
 import type { CommandArgs } from './api';
 import PalletPanel from './PalletPanel';
-import { emptyPallet, GENERAL_RESET_ZONES, parsePalletState } from './pallet';
+import { emptyPallet, GENERAL_RESET_ZONES, palletFromPlacements, parsePalletState } from './pallet';
 import type { CommandType, LinkStatus, PalletState, RobotState, SortResult, SortState, Summary, ZoneMap } from './types';
 import { VossSortingWorkspace } from './components/VossSortingWorkspace';
 import { parseBoxMotion, parseBoxTrack, parseRobotPose, POSE_STALE_MS, TRACK_STALE_MS } from './lib/workspacePosition';
@@ -45,6 +45,8 @@ export default function App() {
   const completedTracks = useRef<Map<number,number>>(new Map());
   const [latestResult,setLatestResult] = useState<SortResult|null>(null);
   const [pallet,setPallet] = useState<PalletState>(emptyPallet);
+  const [palletSource,setPalletSource] = useState<'none'|'db'|'live'>('none');
+  const palletFromSse = useRef(false);
   const [logStatus,setLogStatus] = useState('UNKNOWN');
   const [mqtt,setMqtt] = useState<LinkStatus>('DOWN');
   const [sseConnected,setSseConnected] = useState(false);
@@ -214,7 +216,7 @@ export default function App() {
       if (palletPreview) return;
       // 계약에 어긋나면 이전 배치도를 유지한다 (web_api.md pallet_state).
       const parsed = parsePalletState(JSON.parse((event as MessageEvent).data));
-      if (parsed) setPallet(parsed);
+      if (parsed) {palletFromSse.current=true;setPalletSource('live');setPallet(parsed);}
     });
     stream.addEventListener('log_status',(event)=>setLogStatus(JSON.parse((event as MessageEvent).data).status ?? 'UNKNOWN'));
     stream.addEventListener('link',(event)=>{
@@ -238,6 +240,28 @@ export default function App() {
     });
     return ()=>stream.close();
   },[refresh]);
+  /** ROS 팔레트 상태가 없으면 DB에 확정된 최신 적재 칸을 짧은 간격으로 동기화한다. */
+  useEffect(()=>{
+    if (palletPreview) return;
+    let active = true;
+    let pending = false;
+    async function refreshPlacements() {
+      if (pending || palletFromSse.current) return;
+      pending = true;
+      try {
+        const snapshot = await getLatestPalletPlacements();
+        if (active && !palletFromSse.current) {
+          setPallet(palletFromPlacements(snapshot));
+          setPalletSource(snapshot.run_id ? 'db' : 'none');
+        }
+      } catch (failure) {
+        console.error('[VOSS HMI] pallet_log 조회 실패',failure);
+      } finally {pending = false;}
+    }
+    void refreshPlacements();
+    const timer = window.setInterval(()=>void refreshPlacements(),1500);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[palletPreview]);
   /** 수신 지연 3초와 공식 DB 변화는 각기 다른 주기로 갱신한다. */
   useEffect(()=>{
     void refresh();
@@ -318,7 +342,7 @@ export default function App() {
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">02 / DISTRIBUTION</span><h2>구역별 적재 현황</h2></div><span className="micro-note">PostgreSQL 공식 집계</span></div><div className="zone-grid">{ZONES.map(zone=><div key={zone} className="zone-tile"><span className={`zone-symbol zone-${zone.toLowerCase()}`}>{zone==='RECHECK'?'R':zone==='HOLD'?'H':zone}</span><div><strong>{zone}</strong><small>{zone==='HOLD'?'보류 구역':zone==='RECHECK'?'재확인 구역':'기본 적재 구역'}</small></div><b>{summary?String(summary.by_zone[zone]??0):'—'}<small>건</small></b></div>)}</div></section>
         </div>
         <div className="dashboard-column">
-        <PalletPanel pallet={pallet} sortState={displayState} stale={!palletPreview&&(!sseConnected||displayMqtt!=='UP')} dongs={dongs} controlEnabled={controlEnabled&&!palletPreview} preview={palletPreview} onCommand={(type,args)=>void command(type,args)}/>
+        <PalletPanel pallet={pallet} sortState={displayState} stale={!palletPreview&&palletSource!=='db'&&(!sseConnected||displayMqtt!=='UP')} dongs={dongs} controlEnabled={controlEnabled&&!palletPreview} preview={palletPreview} recorded={palletSource==='db'} onCommand={(type,args)=>void command(type,args)}/>
         <section className="panel"><div className="section-heading"><div><span className="eyebrow">EXCEPTIONS / HOLD</span><h2>보류 목록</h2></div><span className="count-badge">{held.length}건 표시</span></div><div className="hold-list">{held.length?held.map((item,index)=><div className="hold-item" key={`${item.box_id??'held'}-${index}`}><div><strong>{item.box_id??'—'}</strong><small>{item.dong??item.reason??'동 판독 대기'}</small></div><span>{item.zone??'HOLD'}</span></div>):<p className="empty">{error ? "보류 목록 조회 실패 — 서버 연결 확인 필요" : "보류 중인 기록이 없습니다."}</p>}</div></section>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">03 / HISTORY</span><h2>최근 분류 이력</h2></div><a className="text-link" href={`/api/export.csv?session_id=${encodeURIComponent(sessionId||'all')}`}>CSV 다운로드 ↗</a></div><div className="table-scroll"><table><thead><tr><th>박스 ID</th><th>동</th><th>분류</th><th>구역</th><th>시각</th></tr></thead><tbody>{items.length?items.map((item,index)=>{const result=String(item.result??item.outcome??'—');return <tr key={`${item.box_id??'box'}-${index}`}><td>{item.box_id??'—'}</td><td>{item.dong??'—'}</td><td><span className={`chip ${result==='FAILED'?'danger':result==='HELD'?'warning':''}`}>{result}</span></td><td>{item.zone??'—'}</td><td>{displayTime(item.finished_at)}</td></tr>;}):<tr><td colSpan={5} className="no-rows">{error ? "이력 조회 실패 — 서버 연결 확인 필요" : "표시할 이력이 없습니다."}</td></tr>}</tbody></table></div></section>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">OCR / LAST RESULT</span><h2>최근 판독 결과</h2></div><span className="micro-note">MQTT voss/result</span></div><div className="ocr-card"><small>최근 처리 박스</small><strong>{latestResult?.box_id??'아직 처리된 박스가 없습니다'}</strong><div className="ocr-line"><span>인식 동</span><b>{latestResult?.dong??'—'}</b></div><div className="ocr-line"><span>분류 구역</span><b>{latestResult?.zone??'—'}</b></div><div className="ocr-line"><span>분류 결과</span><b>{latestResult?.outcome??'—'}</b></div><div className="ocr-line"><span>인식 신뢰도</span><b>{typeof latestResult?.confidence==='number'?`${(latestResult.confidence*100).toFixed(1)}%`:'—'}</b></div><div className="ocr-line"><span>원문</span><b>{latestResult?.raw_text??'—'}</b></div></div></section>

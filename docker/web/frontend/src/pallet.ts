@@ -1,7 +1,7 @@
 // Sprint 2 S2-T08 팔레트 3D 화면의 순수 계산(React·DOM 없음, node --test 로 시험).
 // 입력: voss/pallet/state JSON(PalletState). 출력: 칸 좌표·사선 투영 다각형·집계·진행률·경로 검사.
 // 근거: BRD v1.5 10.4·TR-PAL-10, docs/interfaces/voss_msgs.md PalletState, web_api.md pallet_state.
-import type { PalletState } from './types';
+import type { PalletPlacements, PalletState } from './types';
 
 export const COLS = 4;
 export const LANES = 2;
@@ -26,6 +26,38 @@ const EMPTY_STATE:PalletState = {
 };
 
 export function emptyPallet():PalletState { return structuredClone(EMPTY_STATE); }
+
+/** pallet_state 가 아직 없는 Web PC에서 공식 pallet_log의 확정 결과로 배치도를 채운다. */
+export function palletFromPlacements(snapshot:PalletPlacements):PalletState {
+  const state = emptyPallet();
+  if (!snapshot.run_id) return state;
+  state.run_id = snapshot.run_id;
+  state.state = 'DONE'; // 회차 종료 여부는 DB에 없으므로 패널에서 별도 출처 문구로 표시한다.
+  const routeOrder = new Map<string,number>();
+  for (const item of snapshot.items) {
+    if (!item.dong) continue;
+    const order = typeof item.route_index === 'number' ? item.route_index : MAX_ROUTE;
+    routeOrder.set(item.dong, Math.min(routeOrder.get(item.dong) ?? order, order));
+  }
+  state.dongs = [...routeOrder.keys()].sort((a,b)=>(routeOrder.get(a)??MAX_ROUTE)-(routeOrder.get(b)??MAX_ROUTE));
+  state.route = state.dongs.filter(dong=>(routeOrder.get(dong)??MAX_ROUTE)<MAX_ROUTE);
+  state.load = state.dongs.map(dong=>snapshot.items.filter(item=>item.dong===dong && item.result==='DONE').length);
+  state.overflow = state.dongs.map(dong=>snapshot.items.filter(item=>item.dong===dong && item.result==='OVERFLOW').length);
+  state.excluded = state.dongs.map(dong=>snapshot.items.filter(item=>item.dong===dong && item.result==='EXCLUDED').length);
+  state.overflow_warning = state.overflow.some(count=>count>0);
+  for (const item of snapshot.items) {
+    const slot = item.pallet_slot;
+    if (slot === null || !Number.isInteger(slot) || slot < 0 || slot >= CAPACITY) continue;
+    if (item.result !== 'DONE' && item.result !== 'FAILED') continue;
+    state.slot_state[slot] = item.result;
+    state.slot_box_id[slot] = item.box_id;
+    state.slot_dong[slot] = item.dong;
+  }
+  state.done = state.slot_state.filter(slot=>slot==='DONE').length;
+  state.failed = state.slot_state.filter(slot=>slot==='FAILED').length;
+  state.total = CAPACITY;
+  return state;
+}
 
 const isText = (v:unknown):v is string => typeof v === 'string';
 const isInt = (v:unknown):v is number => typeof v === 'number' && Number.isInteger(v);

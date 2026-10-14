@@ -1,7 +1,7 @@
 // T13 #22 서버와 같은 출처의 REST API만 호출한다.
 // 입력: 명령·조회 파라미터. 출력: 계약 JSON 또는 실패 코드.
 // 근거: docs/interfaces/web_api.md.
-import type { ApiError, CommandType, SortResult, Summary } from './types';
+import type { ApiError, CommandType, PalletPlacements, SortResult, Summary } from './types';
 
 const REQUEST_TIMEOUT_MS = 5000;
 
@@ -32,6 +32,7 @@ export async function request<T>(url:string, init?:RequestInit):Promise<T> {
 }
 
 export function getSummary():Promise<Summary> { return request('/api/sessions/current'); }
+export function getLatestPalletPlacements():Promise<PalletPlacements> { return request('/api/pallet/placements/latest'); }
 export function getResults(sessionId:string, result?:string):Promise<{items:SortResult[]}> {
   const params = new URLSearchParams({session_id:sessionId, limit:'50'});
   if (result) params.set('result',result);

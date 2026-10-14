@@ -10,3 +10,5 @@ export type LinkStatus = 'UP'|'DOWN';
 export type CommandType = 'start'|'stop'|'resume'|'priority'|'answer'|'reset_zone'|'palletize';
 // Sprint 2 S2-T08: voss/pallet/state = PalletState 필드 그대로 (voss_msgs.md, 칸 배열 16 = slot 0~15).
 export type PalletState = { run_id:string; state:string; route:string[]; dongs:string[]; load:number[]; overflow:number[]; excluded:number[]; overflow_warning:boolean; total:number; done:number; failed:number; box_id:string; slot_state:string[]; slot_box_id:string[]; slot_dong:string[] };
+export type PalletPlacement = { box_id:string; dong:string; route_index:number|null; pallet_slot:number|null; result:string };
+export type PalletPlacements = { run_id:string; items:PalletPlacement[] };

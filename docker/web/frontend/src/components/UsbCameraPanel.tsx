@@ -15,10 +15,10 @@ function cameraError(error: unknown): string {
 export function UsbCameraPanel() {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState('c270');
   const [showC270, setShowC270] = useState(false);
   const [live, setLive] = useState(false);
-  const [message, setMessage] = useState('카메라를 선택하면 영상이 자동으로 표시됩니다.');
+  const [message, setMessage] = useState(`${CAMERA_NAME} 연결 중`);
 
   useEffect(() => {
     let active = true;

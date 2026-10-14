@@ -108,7 +108,7 @@ ADR-0006 기준. 브라우저는 Nginx(80) 하나로 들어오고 `/` → React,
 - 3초 이상 `state` 가 없으면 HMI 는 `UNKNOWN` 으로 표시한다(값을 0·정상으로 위장하지 않음).
 - `state` 의 값은 voss_msgs.md SortState 그대로 받는다 — Sprint 2 `PALLETIZING` 포함. 목록에 없는 값은 버린다(그러면 3초 뒤 UNKNOWN).
 - `pallet_state` 는 바뀔 때만 와서 나이로 장애를 가르지 않는다. 마지막 배치도를 계속 보이되 `link` 가 DOWN 이거나 SSE 가 끊기면 "갱신 안 됨"으로 표시한다. `run_id == ""` 이면 실행 없음(빈 팔레트). 칸 배열 인덱스 = slot 0~15(voss_msgs.md PalletState).
-- 팔레타이징 이력(`pallet_log`) 조회 API 는 이번 스프린트에 두지 않는다. 배치도와 기록의 대조(NFR-14)는 DB 에서 `SELECT … FROM pallet_log WHERE run_id = …` 로 한다(docker/db/README.md).
+- `GET /api/pallet/placements/latest`는 `pallet_log`의 가장 최근 회차에서 `run_id`, `box_id`, `dong`, `route_index`, `pallet_slot`, `result`만 읽는다. `pallet_state`가 도착하지 않는 Web PC에서는 이 공식 기록으로 적재된 칸을 채우고 새 `DONE` 행마다 애니메이션을 보여준다. 화면에는 최근 DB 회차임을 표시하며, DB만으로 실물 비움 여부나 회차 종료를 단정하지 않는다.
 - HMI 반영 ≤ 1초 측정: manager 상태 변경 로그 → DOM(전체), hmi_bridge 수신 → DOM(부분) 둘 다 기록(#54 MC-031).
 
 ### 음성 상태 SSE (`voice_status`, 10/14 승인)

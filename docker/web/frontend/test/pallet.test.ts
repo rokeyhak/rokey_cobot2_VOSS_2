@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   boxShape, CAPACITY, cellSlot, deckShape, dongColor, drawOrder, emptyPallet, overflowWarning, palletKey,
-  GENERAL_RESET_ZONES, parsePalletState, progress, resetPalletAllowed, resetPalletPrompt, routeFromPicks, routePreview, slotCell, summaryRows,
+  GENERAL_RESET_ZONES, palletFromPlacements, parsePalletState, progress, resetPalletAllowed, resetPalletPrompt, routeFromPicks, routePreview, slotCell, summaryRows,
   topViewRows, VIEW_BOX,
 } from '../src/pallet.ts';
 
@@ -15,6 +15,19 @@ const states = fixture.states.map((s:unknown)=>parsePalletState(s));
 const planned = states.find((s:any)=>s.dongs.length > 0);
 const final = states[states.length - 1];
 const SHORT:Record<string,string> = { '청담동':'청담', '역삼동':'역삼', '대치동':'대치' };
+
+test('DB 적재 기록은 실제 pallet_slot만 채우고 경로 제외는 칸을 차지하지 않는다', () => {
+  const state = palletFromPlacements({run_id:'run-1',items:[
+    {box_id:'overflow',dong:'대치동',route_index:1,pallet_slot:null,result:'OVERFLOW'},
+    {box_id:'box-1',dong:'청담동',route_index:2,pallet_slot:0,result:'DONE'},
+    {box_id:'box-2',dong:'대치동',route_index:1,pallet_slot:3,result:'DONE'},
+  ]});
+  assert.equal(state.done,2);
+  assert.deepEqual(state.slot_state.slice(0,4),['DONE','EMPTY','EMPTY','DONE']);
+  assert.deepEqual(state.route,['대치동','청담동']);
+  assert.deepEqual(state.overflow,[1,0]);
+  assert.equal(state.slot_box_id[0],'box-1');
+});
 
 test('slot ↔ 열·층·줄은 slot = (열−1)×4 + (층−1)×2 + (줄−1) 이다 (D2)', () => {
   assert.deepEqual(slotCell(0), {col:1, layer:1, lane:1});

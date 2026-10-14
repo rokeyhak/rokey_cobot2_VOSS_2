@@ -1,9 +1,9 @@
 # 10/13 실측·확인 — S4 실기: FF 여러 값 × 닫힘 오프셋 자 측정 (U13, #28)
 
-값은 **여기에만** 적는다. 측정은 공용 PC(ms-03, ROS_DOMAIN_ID 30). 기록은 Claude(공용 PC 세션)가 로그·출력·파일·현장 보고에서 옮겨 적었다.
+값은 **여기에만** 적는다. 측정은 공용 PC(ROS_DOMAIN_ID 30). 기록은 Claude(공용 PC 세션)가 로그·출력·파일·현장 보고에서 옮겨 적었다.
 관측값과 근거만 적고, 추측은 *(추측)* 으로 따로 표시한다. voss_servo 관련 판정·해석은 박병후 님이 한다.
 절차: `docs/S2-T15-voss_servo-belt-along` 브랜치(ed110e3)의 `src/voss_servo/design/S4-run.md`·`U13-belt-along.md` + 현장 가이드(S4-field-guide-1014). 가이드는 10/14 용이었으나 **10/13 저녁에 실행**했다(원본 로그 이름 `*_20261013_*`). 시각 KST. 원본 로그(`data/servo/`)는 git-ignored → 묶음 `S4-1013-u13.tar.gz`(공용 PC `~/voss_data/1014/u13/`)로 개인 PC 에 옮긴다.
-부호: **y = TCP(핑거 중심) − 박스 중심, 벨트 방향, + = TCP 가 하류.** y_phys = 자로 잰 값, y_con = 로그(닫힘 순간 추정), b_phys = y_phys − y_con(로그가 못 보는 몫).
+부호: **y = TCP(핑거 중심) − 박스 중심, 벨트 방향, + = TCP 가 하류.** y_phys = 자로 잰 값, y_con = 로그(닫힘 순간 추정), b_phys = y_phys − y_con(로그가 못 보는 몫). belt_servo 틱 로그의 `err_along_m`(박스 − TCP, + = 박스가 하류)과 **부호가 반대**다.
 
 ## 요약 (회신 양식)
 

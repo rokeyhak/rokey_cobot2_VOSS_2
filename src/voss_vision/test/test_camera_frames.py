@@ -3,17 +3,17 @@ from voss_vision.camera_frames import CameraFrames
 
 def test_boxes_only_match_their_own_frame():
     frames = CameraFrames()
-    frames.add_frame(10, 'first', now=0)
-    frames.add_frame(11, 'second', now=0.1)
+    frames.add_frame(10, "first", now=0)
+    frames.add_frame(11, "second", now=0.1)
     frames.add_box(10, 7, [1, 2, 3, 4])
-    assert frames.snapshot(now=0.25) == ('first', {7: (1, 2, 3, 4)})
-    assert frames.snapshot(now=0.35) == ('second', {})
+    assert frames.snapshot(now=0.25) == ("first", {7: (1, 2, 3, 4)})
+    assert frames.snapshot(now=0.35) == ("second", {})
 
 
 def test_missing_and_stale_frames_are_not_shown():
     frames = CameraFrames()
     assert frames.snapshot(now=0) is None
-    frames.add_frame(1, 'frame', now=0)
+    frames.add_frame(1, "frame", now=0)
     assert frames.snapshot(now=0.1) is None
     assert frames.snapshot(now=1.01) is None
 

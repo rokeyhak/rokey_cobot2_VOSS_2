@@ -18,24 +18,29 @@
 .dong-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}.warn-text{color:#f6c48d;font-weight:700}.pallet-note{text-align:left;margin-top:12px}
 @media(max-width:1200px){.pallet-tables{grid-template-columns:1fr}}@media(max-width:700px){.route-picker{grid-template-columns:1fr}}
 
-/* 작업공간 옆에 세션 요약을 배치한다. */
-.monitoring-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:19px;align-items:stretch;margin-bottom:20px}
-.monitoring-grid>.voss-ws{min-width:0;margin-bottom:0}
-.monitoring-grid>.summary-grid{grid-template-columns:minmax(0,1fr);margin-bottom:0}
-@media(max-width:1000px){.monitoring-grid{grid-template-columns:minmax(0,1fr)}.monitoring-grid>.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* 두 열을 독립적으로 쌓아 짧은 패널 아래에도 큰 공백이 생기지 않게 한다. */
+.dashboard-columns{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start;margin-bottom:16px}
+.dashboard-column{display:flex;flex-direction:column;gap:16px;min-width:0}
+.dashboard-column>.voss-ws{margin-bottom:0}
+.dashboard-column>.summary-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:0}
+.dashboard-column>.summary-grid>.robot-status-panel{grid-column:1 / -1}
+.dashboard-column>.summary-grid>.metric{min-height:108px;padding:15px 17px}
+.dashboard-column>.pallet-panel{min-width:0;margin-top:0}
+.dashboard-column .pallet-tables{grid-template-columns:minmax(0,1fr);gap:12px}
+@media(max-width:1200px){.dashboard-columns{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){.dashboard-column>.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:450px){.dashboard-column>.summary-grid{grid-template-columns:minmax(0,1fr)}}
+
+@media(min-width:701px){.workspace{padding-top:28px;padding-right:clamp(18px,2vw,34px);padding-left:clamp(18px,2vw,34px)}.top-bar{margin-bottom:20px}}
 
 .robot-status-panel>.section-heading{flex-wrap:wrap;gap:10px;margin-bottom:18px}
 .operation-status{padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid #243949}
 .robot-status-panel .robot-visual>div:last-child{min-width:0;overflow-wrap:anywhere}
-@media(max-width:1000px){.monitoring-grid>.summary-grid>.robot-status-panel{grid-column:1 / -1}}
 
 .camera-preview{position:relative;aspect-ratio:16/9;background:#08121e;border:1px solid #243949;border-radius:10px;overflow:hidden}
 .camera-preview video{display:block;width:100%;height:100%;object-fit:contain}
 .camera-preview>span{position:absolute;inset:0;display:grid;place-items:center;color:#829bad;font-size:12px}
-.camera-controls{margin-top:18px}
-.camera-controls .inline-input{flex-wrap:wrap}
-.camera-controls select{flex-basis:100%}
-.camera-controls button{min-height:39px}
+.camera-device-field{margin-top:16px}
 
 .navigation>button{padding:13px 15px;border:0;border-radius:9px;background:transparent;color:inherit;font:inherit;text-align:left}
 .navigation>button:focus-visible{outline:2px solid #66e4d9;outline-offset:2px}
@@ -44,7 +49,6 @@
 @media(max-width:700px){.sidebar{flex-wrap:wrap;gap:12px}.navigation{display:flex;flex-direction:row;order:3;width:100%}.navigation>button{flex:1}}
 
 .camera-preview>img{width:100%;height:100%;object-fit:contain}
-.camera-connect{margin-top:18px;padding:0 16px}
 
 /* 기존 제어 패널 스타일은 유지하고 투입 수량 증감 조작만 분리한다. */
 .plan-stepper{display:flex;flex:1;min-width:0;gap:5px}

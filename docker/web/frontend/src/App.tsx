@@ -10,8 +10,8 @@ import PalletPanel from './PalletPanel';
 import { emptyPallet, GENERAL_RESET_ZONES, parsePalletState } from './pallet';
 import type { CommandType, LinkStatus, PalletState, RobotState, SortResult, SortState, Summary, ZoneMap } from './types';
 import { VossSortingWorkspace } from './components/VossSortingWorkspace';
-import { parseBoxMotion, parseBoxTrack, parseRobotJoints, parseRobotPose, JOINT_STALE_MS, POSE_STALE_MS, TRACK_STALE_MS } from './lib/workspacePosition';
-import type { BoxMotionSample, BoxTrackSample, RobotJointSample, RobotPoseSample } from './lib/workspacePosition';
+import { parseBoxMotion, parseBoxTrack, parseRobotPose, POSE_STALE_MS, TRACK_STALE_MS } from './lib/workspacePosition';
+import type { BoxMotionSample, BoxTrackSample, RobotPoseSample } from './lib/workspacePosition';
 import { GripperCameraPanel } from './components/GripperCameraPanel';
 import { UsbCameraPanel } from './components/UsbCameraPanel';
 import { parseVoiceSignal } from './lib/voiceIndicator';
@@ -41,7 +41,6 @@ export default function App() {
   const [robotReceivedAt,setRobotReceivedAt] = useState<number|null>(null);
   const [boxTracks,setBoxTracks] = useState<Record<number,BoxTrackSample>>({});
   const [robotPose,setRobotPose] = useState<RobotPoseSample|null>(null);
-  const [robotJoints,setRobotJoints] = useState<RobotJointSample|null>(null);
   const [boxMotion,setBoxMotion] = useState<BoxMotionSample|null>(null);
   const completedTracks = useRef<Map<number,number>>(new Map());
   const [latestResult,setLatestResult] = useState<SortResult|null>(null);
@@ -173,12 +172,6 @@ export default function App() {
         if (sample) setRobotPose(sample);
       } catch (failure) {console.error('[VOSS HMI] robot_pose 파싱 실패',failure);}
     });
-    stream.addEventListener('robot_joints',(event)=>{
-      try {
-        const sample=parseRobotJoints(JSON.parse((event as MessageEvent).data));
-        if (sample) setRobotJoints(sample);
-      } catch (failure) {console.error('[VOSS HMI] robot_joints 파싱 실패',failure);}
-    });
     stream.addEventListener('box_motion',(event)=>{
       try {
         const sample=parseBoxMotion(JSON.parse((event as MessageEvent).data));
@@ -284,17 +277,16 @@ export default function App() {
     <main className="workspace">
       <header className="top-bar"><div><div className="eyebrow">OPERATION CENTER / LIVE MONITORING</div><h1>{activePage==='cameras'?'카메라 모니터링':'물류 분류 관제'}</h1><p className="subhead">{activePage==='cameras'?'현장 카메라 영상을 확인하세요.':'로봇 동작, 박스 판독과 세션 기록을 한눈에 확인하세요.'}</p></div><div className="header-end"><span className="clock-label">{new Date(clock).toLocaleString('ko-KR')}</span><span className={`live-pill ${sseConnected?'connected':'disconnected'}`}>{sseConnected?'● LIVE':'● OFFLINE'}</span></div></header>
       {activePage==='cameras' ? <div className="camera-page"><UsbCameraPanel /><GripperCameraPanel /></div> : <>
-      <div className="monitoring-grid">
+      <div className="dashboard-columns">
+        <div className="dashboard-column">
       {/* 읽기 전용 2D 작업공간: 기존 App의 SSE/REST 상태 재사용. */}
       <VossSortingWorkspace
         state={state}
         robot={robot}
         boxTracks={sseConnected && mqtt==='UP' ? Object.values(boxTracks).filter(track=>clock-track.receivedAt<TRACK_STALE_MS) : []}
         robotPose={robotPose}
-        robotJoints={robotJoints}
         boxMotion={boxMotion}
         isPoseFresh={robotPose!==null && clock-robotPose.receivedAt<POSE_STALE_MS && sseConnected && mqtt==='UP'}
-        isJointsFresh={robotJoints!==null && clock-robotJoints.receivedAt<JOINT_STALE_MS && sseConnected && mqtt==='UP'}
         lastResult={state?.session_id && latestResult?.session_id === state.session_id ? latestResult : null}
         zoneCounts={displayState !== 'UNKNOWN' && state?.session_id && summary?.session_id === state.session_id ? summary.by_zone : null}
         isStateFresh={displayState !== 'UNKNOWN' && sseConnected && mqtt === 'UP'}
@@ -308,9 +300,6 @@ export default function App() {
         <Metric label="보류 / 실패" value={summary?`${summary.held} / ${summary.failed}`:'—'} suffix="건" info="HELD / FAILED" tone="amber"/>
         <Metric label="남은 작업" value={summary?String(summary.remaining):'—'} suffix="건" info="PASSED 제외 · 공식 DB"/>
       </section>
-      </div>
-      <div className="main-grid">
-        <div className="stack">
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">01 / CONTROL</span><h2>운전 및 분류 제어</h2></div><span className="micro-note">시작·이동 명령은 공용 PC 로컬에서만</span></div>
             <div className="button-cluster"><button className="action primary" disabled={!controlEnabled} onClick={()=>void command('start')}>▶   시작</button><button className="action danger" onClick={()=>void command('stop')}>■   정지</button><button className="action subdued" disabled={!controlEnabled} onClick={()=>void command('resume')}>↻   재개</button></div>
             <div className="form-grid"><div className="field"><label htmlFor="planned">투입 예정 수량</label><div className="inline-input"><div className="plan-stepper"><button type="button" aria-label="투입 예정 수량 1개 줄이기" disabled={busy||Number(plannedText)<=1} onClick={()=>stepPlan(-1)}>−</button><input id="planned" type="number" min="1" max="100" step="1" value={plannedText} onChange={event=>{setPlannedText(event.target.value);editingPlan.current=true;}}/><button type="button" aria-label="투입 예정 수량 1개 늘리기" disabled={busy||Number(plannedText)>=100} onClick={()=>stepPlan(1)}>+</button></div><button disabled={busy} onClick={()=>void savePlan()}>저장</button></div></div><div className="field"><label htmlFor="priority">동별 우선 분류</label><div className="inline-input"><select id="priority" value={selectedDong} onChange={event=>setSelectedDong(event.target.value)}><option value="">동 선택</option>{dongs.map(dong=><option key={dong} value={dong}>{dong}</option>)}</select><button disabled={!controlEnabled||!selectedDong} onClick={()=>void command('priority',{dong:selectedDong})}>적용</button></div></div></div>
@@ -319,14 +308,14 @@ export default function App() {
             {state?.pending_question&&<p className="question">질문 대기 · {state.pending_question}</p>}
           </section>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">02 / DISTRIBUTION</span><h2>구역별 적재 현황</h2></div><span className="micro-note">PostgreSQL 공식 집계</span></div><div className="zone-grid">{ZONES.map(zone=><div key={zone} className="zone-tile"><span className={`zone-symbol zone-${zone.toLowerCase()}`}>{zone==='RECHECK'?'R':zone==='HOLD'?'H':zone}</span><div><strong>{zone}</strong><small>{zone==='HOLD'?'보류 구역':zone==='RECHECK'?'재확인 구역':'기본 적재 구역'}</small></div><b>{summary?String(summary.by_zone[zone]??0):'—'}<small>건</small></b></div>)}</div></section>
-          <section className="panel"><div className="section-heading"><div><span className="eyebrow">03 / HISTORY</span><h2>최근 분류 이력</h2></div><a className="text-link" href={`/api/export.csv?session_id=${encodeURIComponent(sessionId||'all')}`}>CSV 다운로드 ↗</a></div><div className="table-scroll"><table><thead><tr><th>박스 ID</th><th>동</th><th>분류</th><th>구역</th><th>시각</th></tr></thead><tbody>{items.length?items.map((item,index)=>{const result=String(item.result??item.outcome??'—');return <tr key={`${item.box_id??'box'}-${index}`}><td>{item.box_id??'—'}</td><td>{item.dong??'—'}</td><td><span className={`chip ${result==='FAILED'?'danger':result==='HELD'?'warning':''}`}>{result}</span></td><td>{item.zone??'—'}</td><td>{displayTime(item.finished_at)}</td></tr>;}):<tr><td colSpan={5} className="no-rows">{error ? "이력 조회 실패 — 서버 연결 확인 필요" : "표시할 이력이 없습니다."}</td></tr>}</tbody></table></div></section>
         </div>
-        <div className="stack">
+        <div className="dashboard-column">
+        <PalletPanel pallet={pallet} sortState={displayState} stale={!palletPreview&&(!sseConnected||displayMqtt!=='UP')} dongs={dongs} controlEnabled={controlEnabled&&!palletPreview} preview={palletPreview} onCommand={(type,args)=>void command(type,args)}/>
+        <section className="panel"><div className="section-heading"><div><span className="eyebrow">EXCEPTIONS / HOLD</span><h2>보류 목록</h2></div><span className="count-badge">{held.length}건 표시</span></div><div className="hold-list">{held.length?held.map((item,index)=><div className="hold-item" key={`${item.box_id??'held'}-${index}`}><div><strong>{item.box_id??'—'}</strong><small>{item.dong??item.reason??'동 판독 대기'}</small></div><span>{item.zone??'HOLD'}</span></div>):<p className="empty">{error ? "보류 목록 조회 실패 — 서버 연결 확인 필요" : "보류 중인 기록이 없습니다."}</p>}</div></section>
+          <section className="panel"><div className="section-heading"><div><span className="eyebrow">03 / HISTORY</span><h2>최근 분류 이력</h2></div><a className="text-link" href={`/api/export.csv?session_id=${encodeURIComponent(sessionId||'all')}`}>CSV 다운로드 ↗</a></div><div className="table-scroll"><table><thead><tr><th>박스 ID</th><th>동</th><th>분류</th><th>구역</th><th>시각</th></tr></thead><tbody>{items.length?items.map((item,index)=>{const result=String(item.result??item.outcome??'—');return <tr key={`${item.box_id??'box'}-${index}`}><td>{item.box_id??'—'}</td><td>{item.dong??'—'}</td><td><span className={`chip ${result==='FAILED'?'danger':result==='HELD'?'warning':''}`}>{result}</span></td><td>{item.zone??'—'}</td><td>{displayTime(item.finished_at)}</td></tr>;}):<tr><td colSpan={5} className="no-rows">{error ? "이력 조회 실패 — 서버 연결 확인 필요" : "표시할 이력이 없습니다."}</td></tr>}</tbody></table></div></section>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">OCR / LAST RESULT</span><h2>최근 판독 결과</h2></div><span className="micro-note">MQTT voss/result</span></div><div className="ocr-card"><small>최근 처리 박스</small><strong>{latestResult?.box_id??'아직 처리된 박스가 없습니다'}</strong><div className="ocr-line"><span>인식 동</span><b>{latestResult?.dong??'—'}</b></div><div className="ocr-line"><span>분류 구역</span><b>{latestResult?.zone??'—'}</b></div><div className="ocr-line"><span>분류 결과</span><b>{latestResult?.outcome??'—'}</b></div><div className="ocr-line"><span>인식 신뢰도</span><b>{typeof latestResult?.confidence==='number'?`${(latestResult.confidence*100).toFixed(1)}%`:'—'}</b></div><div className="ocr-line"><span>원문</span><b>{latestResult?.raw_text??'—'}</b></div></div></section>
-          <section className="panel"><div className="section-heading"><div><span className="eyebrow">EXCEPTIONS / HOLD</span><h2>보류 목록</h2></div><span className="count-badge">{held.length}건 표시</span></div><div className="hold-list">{held.length?held.map((item,index)=><div className="hold-item" key={`${item.box_id??'held'}-${index}`}><div><strong>{item.box_id??'—'}</strong><small>{item.dong??item.reason??'동 판독 대기'}</small></div><span>{item.zone??'HOLD'}</span></div>):<p className="empty">{error ? "보류 목록 조회 실패 — 서버 연결 확인 필요" : "보류 중인 기록이 없습니다."}</p>}</div></section>
         </div>
       </div>
-      <PalletPanel pallet={pallet} sortState={displayState} stale={!palletPreview&&(!sseConnected||displayMqtt!=='UP')} dongs={dongs} controlEnabled={controlEnabled&&!palletPreview} preview={palletPreview} onCommand={(type,args)=>void command(type,args)}/>
       {error&&<p className="error-banner" role="alert">DB / API 조회 실패: {error} — 정확하지 않은 합계는 표시하지 않습니다.</p>}
       </>}
       <footer className="footer"><span>VOSS C-3 · WEB HMI</span><span>세션: {sessionId||'NO_SESSION'}</span><span>조회 시각: {displayTime(summary?.as_of)}</span><span>{!isLocal?'원격 조회 모드 · STOP만 허용':'공용 PC 로컬 제어'}</span></footer>

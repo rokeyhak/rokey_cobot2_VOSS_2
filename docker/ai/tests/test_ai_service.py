@@ -126,6 +126,19 @@ def test_stt_ok(client):
     assert body["duration_ms"] == 1500
 
 
+def test_stt_ignores_prompt_echo_but_keeps_short_stop(client, monkeypatch):
+    prompt = "헬로우 로키. 헬로 로키. 역삼동, 대치동, 청담동. 박스, 분류, 보류, 일시 정지, 시작, 재개, 현재 상태, 작업 이력, 보류 구역."
+    assert main.is_prompt_echo(prompt, prompt)
+    assert main.is_prompt_echo(prompt.replace("일시 정지", "정지"), prompt)
+    assert not main.is_prompt_echo("정지", prompt)
+    monkeypatch.setattr(main, "STT_PROMPT", prompt)
+    monkeypatch.setattr(main, "_get_whisper", lambda: SimpleNamespace(
+        transcribe=lambda *a, **k: ([SimpleNamespace(text=prompt)], SimpleNamespace(duration=1.5))
+    ))
+    response = client.post("/ai/stt", files={"audio": ("seg.wav", _wav(), "audio/wav")})
+    assert response.status_code == 200 and response.json()["text"] == ""
+
+
 def test_stt_rejects_non_wav(client):
     r = client.post("/ai/stt", files={"audio": ("x.mp3", b"ID3....", "audio/mpeg")})
     assert r.status_code == 400 and r.json()["message"] == "AUDIO_INVALID"

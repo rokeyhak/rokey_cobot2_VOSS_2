@@ -1,9 +1,9 @@
 # 10/13 실측·확인 — S4 실기: FF 여러 값 × 닫힘 오프셋 자 측정 (U13, #28)
 
-값은 **여기에만** 적는다. 측정은 공용 PC(ms-03, ROS_DOMAIN_ID 30). 기록은 Claude(공용 PC 세션)가 로그·출력·파일·현장 보고에서 옮겨 적었다.
+값은 **여기에만** 적는다. 측정은 공용 PC(ROS_DOMAIN_ID 30). 기록은 Claude(공용 PC 세션)가 로그·출력·파일·현장 보고에서 옮겨 적었다.
 관측값과 근거만 적고, 추측은 *(추측)* 으로 따로 표시한다. voss_servo 관련 판정·해석은 박병후 님이 한다.
 절차: `docs/S2-T15-voss_servo-belt-along` 브랜치(ed110e3)의 `src/voss_servo/design/S4-run.md`·`U13-belt-along.md` + 현장 가이드(S4-field-guide-1014). 가이드는 10/14 용이었으나 **10/13 저녁에 실행**했다(원본 로그 이름 `*_20261013_*`). 시각 KST. 원본 로그(`data/servo/`)는 git-ignored → 묶음 `S4-1013-u13.tar.gz`(공용 PC `~/voss_data/1014/u13/`)로 개인 PC 에 옮긴다.
-부호: **y = TCP(핑거 중심) − 박스 중심, 벨트 방향, + = TCP 가 하류.** y_phys = 자로 잰 값, y_con = 로그(닫힘 순간 추정), b_phys = y_phys − y_con(로그가 못 보는 몫).
+부호: **y = TCP(핑거 중심) − 박스 중심, 벨트 방향, + = TCP 가 하류.** y_phys = 자로 잰 값, y_con = 로그(닫힘 순간 추정), b_phys = y_phys − y_con(로그가 못 보는 몫). belt_servo 틱 로그의 `err_along_m`(박스 − TCP, + = 박스가 하류)과 **부호가 반대**다.
 
 ## 요약 (회신 양식)
 
@@ -214,11 +214,11 @@ goal 전(박스 x −125 ~ −100 mm, 관측 자세) 컬러 프레임에서 박�
 
 ## gate_summary (S4 시리즈별)
 
-attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36회)을 조건(FF × z 프로파일 × 박스 자세)별 시리즈로 묶어 `gate_summary` 를 돌린 결과(10/14, `--main 47dc04f` = 실기 코드, 분모 = 시리즈 회차 수). 틱 로그는 git 밖(묶음 `S4-1013-u13.tar.gz`)이라 `--ticks` 없이 돌렸다 → 자동 힌트의 오차 열은 비어 있다.
+attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36회)을 조건(FF × z 프로파일 × 박스 자세)별 시리즈로 묶어 `gate_summary` 를 돌린 결과(10/14, `--main 47dc04f` = 실기 코드, 분모 = 시리즈 회차 수). 틱 로그는 git 밖(묶음 `S4-1013-u13.tar.gz`)이라 `--ticks` 없이 돌렸다 → 자동 힌트의 오차 열은 비어 있다. 표 형식은 G1 회차 기록(ADR-0002)을 따르지만 S4 는 게이트가 아니고, 도구의 "벨트" 칸은 FF 설정값이라 "FF" 로 고쳐 적었다(실제 벨트는 5절 4.73).
 
 ### G1 회차 기록 — 시리즈 s4-ff469-p (gate_summary 자동 집계)
 
-시리즈: `s4-ff469-p` · 시작 시각 19:43:19 · main 47dc04f · belt_servo 파라미터 sha 57256e556afd · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff469-p` · 시작 시각 19:43:19 · main 47dc04f · belt_servo 파라미터 sha 57256e556afd · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -238,11 +238,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 10사례 중 10회 성공(100 %), 최초 시도 성공 10회, 무효 0회. 벨트 h250(4.69 cm/s), main 47dc04f, belt_servo 파라미터 sha 57256e556afd (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 10사례 중 10회 성공(100 %), 최초 시도 성공 10회, 무효 0회. FF 4.69 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha 57256e556afd (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 10
-- 게이트 기준: 10사례 중 7 이상 — 현재 성공 10, 분모 10/10
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 10사례 중 7 이상 — 현재 성공 10, 분모 10/10
 - 설정: config_version 1 · config_sha256 9740282cbef1 · params_sha256 57256e556afd4577a7a6ac1565f7ad27acdcb72ef8d545daaec2cc0d899d6bdc
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -263,7 +263,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff480-p (gate_summary 자동 집계)
 
-시리즈: `s4-ff480-p` · 시작 시각 20:25:50 · main 47dc04f · belt_servo 파라미터 sha 6f764f7ef5bb · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff480-p` · 시작 시각 20:25:50 · main 47dc04f · belt_servo 파라미터 sha 6f764f7ef5bb · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -279,11 +279,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 6사례 중 6회 성공(100 %), 최초 시도 성공 6회, 무효 0회. 벨트 h250(4.80 cm/s), main 47dc04f, belt_servo 파라미터 sha 6f764f7ef5bb (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 6사례 중 6회 성공(100 %), 최초 시도 성공 6회, 무효 0회. FF 4.80 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha 6f764f7ef5bb (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 6
-- 게이트 기준: 6사례 중 5 이상 — 현재 성공 6, 분모 6/6
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 6사례 중 5 이상 — 현재 성공 6, 분모 6/6
 - 설정: config_version 1 · config_sha256 830aab5589c9 · params_sha256 6f764f7ef5bbfe2a347dd546c9b830c16bf50cf4370d8caed23b47a46a116479
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -300,7 +300,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff475-p (gate_summary 자동 집계)
 
-시리즈: `s4-ff475-p` · 시작 시각 20:30:14 · main 47dc04f · belt_servo 파라미터 sha e84d62c25a7c · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff475-p` · 시작 시각 20:30:14 · main 47dc04f · belt_servo 파라미터 sha e84d62c25a7c · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -311,11 +311,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 1사례 중 1회 성공(100 %), 최초 시도 성공 1회, 무효 0회. 벨트 h250(4.75 cm/s), main 47dc04f, belt_servo 파라미터 sha e84d62c25a7c (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 1사례 중 1회 성공(100 %), 최초 시도 성공 1회, 무효 0회. FF 4.75 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha e84d62c25a7c (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 1
-- 게이트 기준: 1사례 중 1 이상 — 현재 성공 1, 분모 1/1
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 1사례 중 1 이상 — 현재 성공 1, 분모 1/1
 - 설정: config_version 1 · config_sha256 095c90b12a3a · params_sha256 e84d62c25a7ca7c4691cebea09182fe98b6b89d457e975f9253061df641fcc55
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -327,7 +327,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff460-p (gate_summary 자동 집계)
 
-시리즈: `s4-ff460-p` · 시작 시각 20:40:58 · main 47dc04f · belt_servo 파라미터 sha b80c1d1df6ff · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff460-p` · 시작 시각 20:40:58 · main 47dc04f · belt_servo 파라미터 sha b80c1d1df6ff · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -343,11 +343,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 6사례 중 6회 성공(100 %), 최초 시도 성공 6회, 무효 0회. 벨트 h250(4.60 cm/s), main 47dc04f, belt_servo 파라미터 sha b80c1d1df6ff (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 6사례 중 6회 성공(100 %), 최초 시도 성공 6회, 무효 0회. FF 4.60 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha b80c1d1df6ff (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 6
-- 게이트 기준: 6사례 중 5 이상 — 현재 성공 6, 분모 6/6
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 6사례 중 5 이상 — 현재 성공 6, 분모 6/6
 - 설정: config_version 1 · config_sha256 bdebc6e57b62 · params_sha256 b80c1d1df6ffb0642884e92319d62f5ecc7fe10e0cc7e3c87aa2cbb276bd691b
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -364,7 +364,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff456-p (gate_summary 자동 집계)
 
-시리즈: `s4-ff456-p` · 시작 시각 20:57:35 · main 47dc04f · belt_servo 파라미터 sha 3bd2e27ed02b · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff456-p` · 시작 시각 20:57:35 · main 47dc04f · belt_servo 파라미터 sha 3bd2e27ed02b · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -379,11 +379,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 5사례 중 5회 성공(100 %), 최초 시도 성공 5회, 무효 0회. 벨트 h250(4.56 cm/s), main 47dc04f, belt_servo 파라미터 sha 3bd2e27ed02b (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 5사례 중 5회 성공(100 %), 최초 시도 성공 5회, 무효 0회. FF 4.56 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha 3bd2e27ed02b (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 5
-- 게이트 기준: 5사례 중 4 이상 — 현재 성공 5, 분모 5/5
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 5사례 중 4 이상 — 현재 성공 5, 분모 5/5
 - 설정: config_version 1 · config_sha256 efb408054f34 · params_sha256 3bd2e27ed02b6662e7b48c151c52a4156d1ef44fe3bbeec5d00b67cf0404bf5a
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -399,7 +399,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff456-tilt (gate_summary 자동 집계)
 
-시리즈: `s4-ff456-tilt` · 시작 시각 21:11:57 · main 47dc04f · belt_servo 파라미터 sha 3bd2e27ed02b · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff456-tilt` · 시작 시각 21:11:57 · main 47dc04f · belt_servo 파라미터 sha 3bd2e27ed02b · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -412,11 +412,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 3사례 중 3회 성공(100 %), 최초 시도 성공 3회, 무효 0회. 벨트 h250(4.56 cm/s), main 47dc04f, belt_servo 파라미터 sha 3bd2e27ed02b (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 3사례 중 3회 성공(100 %), 최초 시도 성공 3회, 무효 0회. FF 4.56 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha 3bd2e27ed02b (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 3
-- 게이트 기준: 3사례 중 3 이상 — 현재 성공 3, 분모 3/3
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 3사례 중 3 이상 — 현재 성공 3, 분모 3/3
 - 설정: config_version 1 · config_sha256 efb408054f34 · params_sha256 3bd2e27ed02b6662e7b48c151c52a4156d1ef44fe3bbeec5d00b67cf0404bf5a
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 
@@ -430,7 +430,7 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 ### G1 회차 기록 — 시리즈 s4-ff456-trap (gate_summary 자동 집계)
 
-시리즈: `s4-ff456-trap` · 시작 시각 21:24:30 · main 47dc04f · belt_servo 파라미터 sha 9c3605d7b506 · goal 경로(sort_manager / 시험 도구) ____
+시리즈: `s4-ff456-trap` · 시작 시각 21:24:30 · main 47dc04f · belt_servo 파라미터 sha 9c3605d7b506 · goal 경로 = 시험 도구(sort_manager 없이 `TrackAndGrasp` goal 직접, 박스 x ≈ −94 mm — 0절 운전)
 
 | # | 시각 | 박스(송장) | track_id | reason | attempts | 성공 | 최초 시도 성공 | 원인 | bag 시각 | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -445,11 +445,11 @@ attempts 9개 파일(`data/servo/attempts/servo_attempts_20261013_*.jsonl`, 36�
 
 **요약**
 
-- 측정: 5사례 중 5회 성공(100 %), 최초 시도 성공 5회, 무효 0회. 벨트 h250(4.56 cm/s), main 47dc04f, belt_servo 파라미터 sha 9c3605d7b506 (measurements-1010 #__)
-- 실패 원인: A __ · T __ · G __ · R __ · L __ · D __ · X __ · S __ (원인 열을 사람이 판정한 뒤 채운다)
+- 측정: 5사례 중 5회 성공(100 %), 최초 시도 성공 5회, 무효 0회. FF 4.56 cm/s(벨트 h250, 정지 실측 4.73), main 47dc04f, belt_servo 파라미터 sha 9c3605d7b506 (이 문서 1절)
+- 실패 원인: 해당 없음(실패 0)
 - 자동 힌트 분포(실패 0건, 원인 아님): 없음
 - reason 분포: OK 5
-- 게이트 기준: 5사례 중 4 이상 — 현재 성공 5, 분모 5/5
+- (참고 — S4 는 게이트가 아니다. 도구가 G1 형식으로 찍은 값) 게이트 기준: 5사례 중 4 이상 — 현재 성공 5, 분모 5/5
 - 설정: config_version 1 · config_sha256 efb408054f34 · params_sha256 9c3605d7b506f4ce8e879b8567b60114f77db1cbd1d347ef3a623dd2071d769f
 - 분모 밖: 선언 전(연습) 0건 · --limit 초과 0건
 

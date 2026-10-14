@@ -11,8 +11,11 @@ seg 파라미터(`src/voss_vision/config/box_tracker.yaml`)다.
 실시간 — 공용 PC, 10/11 통합부터. 게이트 측정 중에는 띄우지 않는다(영상 구독이 하나 더 붙어 부하가 는다):
   python3 tools/vision/box_overlay.py --live [--candidates] [--hz 10] [--out live.mp4]
 
-화면: 초록 = 발행된 BoxTrack bbox·track_id·OCR 결과, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
+화면: 초록 = 발행된 BoxTrack bbox·track_id·채움 %·OCR 결과, 노랑 = 각도(yaw)·송장 긴 축, 송장 후보 사각형(흰 = 통과, 빨강 = 가장자리, 주황 = 비율,
 보라 = 채움, 회색 = 면적), 빨간 선 = 가장자리 판정선(border_px), 왼쪽 위 = 시각·단계·TCP 높이(박스 윗면 기준).
+채움 % = 그 트랙과 짝지은 송장 후보의 채움(윤곽 면적 / 회전 사각형 면적 = box_detect score, fill_min 80 % 이상만 통과).
+학습 모델의 신뢰도가 아니라 seg 판정값이다. 각도 숫자는 BoxTrack 에 yaw 필드가 있는 빌드(S2-T16 v15)에서만 — 베이스 +X 기준,
+반시계 +, (−90, 90]. 노란 선은 같은 프레임 송장 후보의 긴 축(픽셀)이라 yaw 필드가 없어도 그린다.
 녹화 재생은 끝에 "발행 끊김"(트랙이 사라진 프레임의 단계·높이·후보 판정)을 찍는다. CSV 는 프레임마다 같은 값.
 """
 
@@ -49,6 +52,8 @@ COLOR = {
 }
 NAME = {"": "통과", "border": "가장자리", "aspect": "비율", "fill": "채움", "area": "면적"}
 TRACK = (0, 230, 0)
+ANGLE = (0, 230, 255)  # 노랑 — 각도만 (의석 제안 10/14: bbox·글자는 초록, 각도는 노랑)
+MATCH_PX = 40  # 트랙 중심과 송장 후보 중심이 이 안이면 같은 박스
 SRC = {0: "-", 1: "H", 2: "HE"}  # BoxTrack.position_source: 호모그래피·핸드아이
 FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -70,6 +75,26 @@ def seg_params(path: Path) -> SegParams:
 def relevant(c: Candidate, p: SegParams, h_img: int) -> bool:
     """송장일 수 있는 후보만 — 반사 점(작은 면적)과 벨트 열 양옆 바닥 띠(위아래 끝에 닿는 세로 띠)는 뺀다."""
     return c.area >= p.area_min / 2 and c.rect[3] < 0.9 * h_img
+
+
+def match_candidate(t, cands) -> Candidate | None:
+    """발행된 트랙과 같은 프레임의 통과 후보 중 중심이 가장 가까운 것(MATCH_PX 안) — 채움 %·긴 축용."""
+    best, best_d = None, MATCH_PX
+    for c in cands:
+        if c.det is None:
+            continue
+        d = float(np.hypot(c.det.u - t.u, c.det.v - t.v))
+        if d <= best_d:
+            best, best_d = c, d
+    return best
+
+
+def yaw_text(t) -> str | None:
+    """BoxTrack yaw(S2-T16 v15 필드) → 'yaw +45.0°'. 필드가 없거나 무효면 None."""
+    if not getattr(t, "yaw_valid", False):
+        return None
+    d = (np.degrees(t.yaw_base) + 90.0) % 180.0 - 90.0
+    return f"yaw {90.0 if d == -90.0 else d:+.1f}° (베이스)"
 
 
 def decode(msg, compressed: bool) -> np.ndarray:
@@ -97,7 +122,10 @@ class Painter:
             pass
         self.font_px = font_px
 
-    def render(self, bgr, cands, p: SegParams, tracks, labels, header: list[str]) -> np.ndarray:
+    def render(
+        self, bgr, cands, p: SegParams, tracks, labels, header: list[str], score_cands=None
+    ) -> np.ndarray:
+        """score_cands: 채움 %·긴 축을 찾을 후보(기본 = cands). 실시간에서 후보는 그리지 않고 % 만 볼 때 따로 준다."""
         s = self.scale
         img = (
             cv2.resize(bgr, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
@@ -138,11 +166,24 @@ class Painter:
             cv2.rectangle(
                 img, (int(x * s), int(y * s)), (int((x + w) * s), int((y + h) * s)), TRACK, 2
             )
+            c = match_candidate(t, cands if score_cands is None else score_cands)
             line = f"id{t.track_id} {SRC.get(t.position_source, '?')}{'' if t.position_valid else ' 무효'}"
+            line += f"  {c.fill * 100:.0f}%" if c is not None else "  -%"
             lab = labels.get(t.track_id)
             if lab is not None:
                 line += f"  {lab.code} {lab.dong} {lab.confidence:.2f}"
             texts.append((int(x * s), max(0, int(y * s) - self.font_px - 4), line, TRACK))
+            if c is not None and c.rot is not None:  # 송장 긴 축 (노랑)
+                (cx, cy), (rw, rh), ang = c.rot
+                a = np.radians(ang if rw >= rh else ang + 90.0)
+                half = 0.6 * max(rw, rh)
+                dx, dy = half * np.cos(a), half * np.sin(a)
+                cv2.line(img, (int((cx - dx) * s), int((cy - dy) * s)),
+                         (int((cx + dx) * s), int((cy + dy) * s)), ANGLE, 2)  # fmt: skip
+            yt = yaw_text(t)
+            if yt is not None:
+                # 초록 id 줄 바로 위 — 오른쪽은 레일 후보 글자와 겹친다
+                texts.append((int(x * s), max(0, int(y * s) - 2 * (self.font_px + 4)), yt, ANGLE))
         box_h = (self.font_px + 6) * len(header) + 6
         cv2.rectangle(img, (0, 0), (int(min(w_img * s, 760)), box_h), (0, 0, 0), -1)
         for i, line in enumerate(header):
@@ -407,7 +448,8 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                                      lambda m: setattr(self, "phase", (m.feedback.phase, time.monotonic())), be)  # fmt: skip
             self.create_timer(1.0 / args.hz, self.tick)
             self.get_logger().info(
-                f"{topic} 구독, {args.hz} Hz 그리기, 후보 {'표시' if args.candidates else '끔'} — q 로 끝"
+                f"{topic} 구독, {args.hz} Hz 그리기, 후보 {'표시' if args.candidates else '끔'}, "
+                f"채움 % {'끔' if args.no_score and not args.candidates else '표시'} — q 로 끝"
             )
 
         def on_box(self, m: BoxTrack) -> None:
@@ -426,7 +468,9 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
             )
             t = ns(msg.header.stamp)
             bgr = decode(msg, self.compressed)
-            cands = detect_candidates(bgr, p)[1] if args.candidates else []
+            # 채움 % 를 내려면 같은 판정이 필요하다 — 후보 사각형은 --candidates 일 때만 그린다
+            scored = detect_candidates(bgr, p)[1] if (args.candidates or not args.no_score) else []
+            cands = scored if args.candidates else []
             tracks = self.boxes.get(t, [])
             ph = self.phase[0] if time.monotonic() - self.phase[1] < 2.0 else "-"
             h_txt = "-" if self.pose_z is None else f"{self.pose_z - plane_z:+.1f} mm"
@@ -439,7 +483,9 @@ def run_live(args, p: SegParams, plane_z: float) -> None:
                     else ""
                 ),
             ]
-            out = self.painter.render(bgr, cands, p, tracks, self.labels, header)
+            out = self.painter.render(
+                bgr, cands, p, tracks, self.labels, header, score_cands=scored
+            )
             if args.out:
                 if self.writer is None:
                     self.writer = cv2.VideoWriter(str(args.out), cv2.VideoWriter_fourcc(*"mp4v"),
@@ -488,6 +534,11 @@ def main() -> None:
     )
     ap.add_argument(
         "--candidates", action="store_true", help="실시간: 후보·버린 이유도 (CPU 를 더 쓴다)"
+    )
+    ap.add_argument(
+        "--no-score",
+        action="store_true",
+        help="실시간: 채움 %%·긴 축 끄기 (판정을 안 돌려 CPU 를 덜 쓴다)",
     )
     ap.add_argument("--hz", type=float, default=10.0, help="실시간: 그리는 주기")
     ap.add_argument(

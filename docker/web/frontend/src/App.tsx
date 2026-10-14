@@ -65,6 +65,7 @@ export default function App() {
   const [clock,setClock] = useState(Date.now());
   const [voiceSignal,setVoiceSignal] = useState<VoiceSignal|null>(null);
   const isLocal = LOCAL_HOSTS.has(location.hostname);
+  const palletPreview = isLocal && new URLSearchParams(location.search).has('palletReplay');
   const displayState:DisplayState = sseConnected && stateReceivedAt !== null && clock-stateReceivedAt < TIMEOUT_MS ? (state?.state ?? 'UNKNOWN') : 'UNKNOWN';
   const robotFresh = sseConnected && mqtt === 'UP' && robotReceivedAt !== null && clock-robotReceivedAt < TIMEOUT_MS;
   const displayRobot = robotFresh ? robot : null;
@@ -73,6 +74,30 @@ export default function App() {
   const sessionId = state?.session_id ?? summary?.session_id ?? '';
   const dongs = useMemo(()=>zoneMap?.entries.map(entry=>entry.dong) ?? [],[zoneMap]);
   const controlEnabled = isLocal && mqtt === 'UP' && !busy;
+  useEffect(() => {
+    if (!palletPreview) return;
+    const slotDong = Array.from({length:16},(_,slot)=>slot<6?'청담동':slot<12?'대치동':'역삼동');
+    setPallet({
+      run_id:'PREVIEW',state:'RUNNING',route:['역삼동','대치동','청담동'],
+      dongs:['역삼동','대치동','청담동'],load:[4,6,6],overflow:[0,0,0],excluded:[0,0,0],
+      overflow_warning:false,total:16,done:0,failed:0,box_id:'',
+      slot_state:Array(16).fill('PLANNED'),slot_box_id:Array(16).fill(''),slot_dong:slotDong,
+    });
+    let slot = 0;
+    const timer = window.setInterval(() => {
+      const index = slot;
+      setPallet(current => {
+        const nextState = [...current.slot_state];
+        const nextBoxIds = [...current.slot_box_id];
+        nextState[index] = 'DONE';
+        nextBoxIds[index] = `PREVIEW-${String(index+1).padStart(2,'0')}`;
+        return {...current,state:index===15?'DONE':'RUNNING',done:index+1,slot_state:nextState,slot_box_id:nextBoxIds};
+      });
+      slot++;
+      if (slot===16) window.clearInterval(timer);
+    }, 950);
+    return () => window.clearInterval(timer);
+  }, [palletPreview]);
   // stop은 busy·연결 표시와 무관하게 언제든 시도한다 (web_api.md).
 
   /** 공식 통계/이력은 항상 REST DB에서 다시 읽으며 메모리 MQTT 수치로 대체하지 않는다. */
@@ -192,6 +217,7 @@ export default function App() {
       void refresh();
     });
     stream.addEventListener('pallet_state',(event)=>{
+      if (palletPreview) return;
       // 계약에 어긋나면 이전 배치도를 유지한다 (web_api.md pallet_state).
       const parsed = parsePalletState(JSON.parse((event as MessageEvent).data));
       if (parsed) setPallet(parsed);
@@ -300,7 +326,7 @@ export default function App() {
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">EXCEPTIONS / HOLD</span><h2>보류 목록</h2></div><span className="count-badge">{held.length}건 표시</span></div><div className="hold-list">{held.length?held.map((item,index)=><div className="hold-item" key={`${item.box_id??'held'}-${index}`}><div><strong>{item.box_id??'—'}</strong><small>{item.dong??item.reason??'동 판독 대기'}</small></div><span>{item.zone??'HOLD'}</span></div>):<p className="empty">{error ? "보류 목록 조회 실패 — 서버 연결 확인 필요" : "보류 중인 기록이 없습니다."}</p>}</div></section>
         </div>
       </div>
-      <PalletPanel pallet={pallet} sortState={displayState} stale={!sseConnected||displayMqtt!=='UP'} dongs={dongs} controlEnabled={controlEnabled} onCommand={(type,args)=>void command(type,args)}/>
+      <PalletPanel pallet={pallet} sortState={displayState} stale={!palletPreview&&(!sseConnected||displayMqtt!=='UP')} dongs={dongs} controlEnabled={controlEnabled&&!palletPreview} preview={palletPreview} onCommand={(type,args)=>void command(type,args)}/>
       {error&&<p className="error-banner" role="alert">DB / API 조회 실패: {error} — 정확하지 않은 합계는 표시하지 않습니다.</p>}
       </>}
       <footer className="footer"><span>VOSS C-3 · WEB HMI</span><span>세션: {sessionId||'NO_SESSION'}</span><span>조회 시각: {displayTime(summary?.as_of)}</span><span>{!isLocal?'원격 조회 모드 · STOP만 허용':'공용 PC 로컬 제어'}</span></footer>

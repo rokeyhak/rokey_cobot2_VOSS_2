@@ -17,6 +17,10 @@ if printf '%s\n' "$visible_nodes" | grep -Eq '^/(voice_listener|intent_parser|sp
   echo '음성 노드가 이미 보입니다. 중복 실행을 막기 위해 종료합니다.' >&2
   exit 1
 fi
+if pgrep -u "$(id -u)" -f '^/usr/bin/python3 .*/voss_hmi/hmi_bridge --ros-args -r __node:=web_voice_status_bridge' >/dev/null; then
+  echo '기존 Web PC 음성 상태 브리지 프로세스가 있습니다. 종료한 뒤 다시 실행하세요.' >&2
+  exit 1
+fi
 curl --noproxy '*' -fsS --max-time 5 http://127.0.0.1:8000/ai/health >/dev/null
 curl --noproxy '*' -fsS --max-time 5 http://127.0.0.1:8080/api/sessions/current >/dev/null
 log_dir="$(mktemp -d /tmp/voss-web-voice.XXXXXX)"

@@ -27,6 +27,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 from voss_hmi.mqtt_logic import CommandError, pallet_state_payload, parse_command_json
+from voss_hmi.text_request import parse_text_reply, parse_text_request
 from voss_hmi.voice_status import forward_voice_status
 from voss_hmi.voice_request import parse_voice_request
 from voss_msgs.msg import BoxTrack, PalletState, RobotState, SortResult, SortState, ZoneMap
@@ -48,6 +49,8 @@ MQTT_PREVIEW_PASSWORD_ENV = "VOSS_MQTT_PREVIEW_PASSWORD"
 MQTT_COMMAND_TOPIC = "voss/command"
 MQTT_ACK_TOPIC = "voss/command/ack"
 MQTT_VOICE_REQUEST_TOPIC = "voss/voice/request"
+MQTT_TEXT_TOPIC = "voss/voice/text"
+MQTT_TEXT_REPLY_TOPIC = "voss/voice/text/reply"
 COMMAND_CACHE_TTL_S = 600.0
 COMMAND_QUEUE_MAX = 100
 COMMAND_DRAIN_PERIOD_S = 0.05
@@ -89,7 +92,9 @@ class HmiBridgeNode(Node):
 
         self._command_queue: queue.Queue[str] = queue.Queue(maxsize=COMMAND_QUEUE_MAX)
         self._voice_request_queue: queue.Queue[str] = queue.Queue(maxsize=COMMAND_QUEUE_MAX)
+        self._text_queue: queue.Queue[str] = queue.Queue(maxsize=COMMAND_QUEUE_MAX)
         self._voice_request_cache: OrderedDict[str, float] = OrderedDict()
+        self._text_cache: OrderedDict[str, float] = OrderedDict()
         self._command_cache: OrderedDict[str, tuple[float, dict | None]] = OrderedDict()
         self._last_box_sent: dict[int, float] = {}
         self._last_pose_sent = 0.0
@@ -97,6 +102,8 @@ class HmiBridgeNode(Node):
 
         self._command_client = self.create_client(Command, "/voss/sort/command")
         self._say_publisher = self.create_publisher(String, "/voss/voice/say", QOS_RELIABLE_10)
+        self._text_publisher = self.create_publisher(String, "/voss/voice/text", QOS_RELIABLE_10)
+        self.create_subscription(String, "/voss/voice/text/reply", self._on_text_reply, QOS_RELIABLE_10)
 
         self.create_subscription(
             SortState,
@@ -213,6 +220,7 @@ class HmiBridgeNode(Node):
         if not self._voice_status_only:
             client.subscribe(MQTT_COMMAND_TOPIC, qos=1)
             client.subscribe(MQTT_VOICE_REQUEST_TOPIC, qos=1)
+            client.subscribe(MQTT_TEXT_TOPIC, qos=1)
         self.get_logger().info("MQTT connected")
 
     def _on_mqtt_disconnect(self, client, userdata, rc) -> None:
@@ -225,7 +233,7 @@ class HmiBridgeNode(Node):
         """MQTT 스레드에서는 payload를 큐에 넣기만 한다."""
 
         del client, userdata
-        if message.topic not in (MQTT_COMMAND_TOPIC, MQTT_VOICE_REQUEST_TOPIC):
+        if message.topic not in (MQTT_COMMAND_TOPIC, MQTT_VOICE_REQUEST_TOPIC, MQTT_TEXT_TOPIC):
             return
         if getattr(message, "retain", False):
             return
@@ -237,7 +245,8 @@ class HmiBridgeNode(Node):
             return
 
         try:
-            target = self._voice_request_queue if message.topic == MQTT_VOICE_REQUEST_TOPIC else self._command_queue
+            target = (self._voice_request_queue if message.topic == MQTT_VOICE_REQUEST_TOPIC else
+                      self._text_queue if message.topic == MQTT_TEXT_TOPIC else self._command_queue)
             target.put_nowait(payload)
         except queue.Full:
             self.get_logger().error("MQTT queue full: %s" % message.topic)
@@ -446,6 +455,11 @@ class HmiBridgeNode(Node):
     def _on_voice_status(self, message: String) -> None:
         forward_voice_status(self._mqtt, message.data)
 
+    def _on_text_reply(self, message: String) -> None:
+        reply = parse_text_reply(message.data)
+        if reply is not None:
+            self._publish_json(MQTT_TEXT_REPLY_TOPIC, reply, qos=1, retain=False)
+
     def _on_log_status(self, message: String) -> None:
         """logger 상태를 retained voss/log_status로 발행한다."""
 
@@ -464,6 +478,27 @@ class HmiBridgeNode(Node):
                 break
             self._process_command(payload)
         self._drain_voice_requests()
+        self._drain_text_requests()
+
+    def _drain_text_requests(self) -> None:
+        """새 텍스트만 기존 intent_parser의 입력으로 전달한다."""
+        cutoff = time.monotonic() - COMMAND_CACHE_TTL_S
+        while self._text_cache and next(iter(self._text_cache.values())) < cutoff:
+            self._text_cache.popitem(last=False)
+        for _ in range(COMMAND_QUEUE_MAX):
+            try:
+                payload = self._text_queue.get_nowait()
+            except queue.Empty:
+                return
+            parsed = parse_text_request(payload, datetime.now(KST))
+            if parsed is None:
+                continue
+            request_id, text = parsed
+            if request_id in self._text_cache:
+                continue
+            self._text_cache[request_id] = time.monotonic()
+            self._text_publisher.publish(String(data=json.dumps(
+                {"request_id": request_id, "text": text}, ensure_ascii=False)))
 
     def _drain_voice_requests(self) -> None:
         """허용된 버튼 문구만 speech_out으로 넘기며 QoS 재전송은 중복 발화하지 않는다."""

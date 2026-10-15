@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+import uuid
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -35,6 +37,7 @@ class IntentParserNode(Node):
 
         self._pub_intent = self.create_publisher(Intent, "/voss/voice/intent", QOS_EVENTS)
         self._pub_say = self.create_publisher(String, "/voss/voice/say", QOS_EVENTS)
+        self._pub_text_reply = self.create_publisher(String, "/voss/voice/text/reply", QOS_EVENTS)
 
         ai_base = self.get_parameter("ai_base").value
         api_base = self.get_parameter("api_base").value
@@ -59,6 +62,9 @@ class IntentParserNode(Node):
         self.create_subscription(
             String, "/voss/voice/transcript", self._on_transcript, QOS_EVENTS, callback_group=group
         )
+        self.create_subscription(
+            String, "/voss/voice/text", self._on_text_command, QOS_EVENTS, callback_group=group
+        )
         self.get_logger().info("intent_parser ready (zone_map 대기 중)")
 
     def _on_zone_map(self, msg: ZoneMap) -> None:
@@ -74,6 +80,24 @@ class IntentParserNode(Node):
         kind, ms = self._flow.handle(msg.data)
         if kind != "empty":
             self.get_logger().info(f"{kind} '{msg.data.strip()}' {ms:.0f} ms")
+
+    def _on_text_command(self, msg: String) -> None:
+        try:
+            data = json.loads(msg.data)
+            request_id = data["request_id"]
+            text = data["text"]
+            if (not isinstance(request_id, str) or str(uuid.UUID(request_id)) != request_id
+                    or not isinstance(text, str) or not 1 <= len(text.strip()) <= 240):
+                return
+        except (ValueError, KeyError, TypeError):
+            return
+
+        def reply(message: str) -> None:
+            payload = {"request_id": request_id, "message": message}
+            self._pub_text_reply.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+
+        kind, ms = self._flow.handle(text, report=reply)
+        self.get_logger().info(f"text {kind} {ms:.0f} ms")
 
     def _publish(self, fields: dict) -> None:
         m = Intent()

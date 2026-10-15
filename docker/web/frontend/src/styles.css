@@ -55,3 +55,10 @@
 .plan-stepper input{text-align:center;appearance:textfield;-moz-appearance:textfield}
 .plan-stepper input::-webkit-inner-spin-button,.plan-stepper input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .plan-stepper button{min-width:31px;padding:0 8px;font-size:18px;line-height:1}
+
+.text-command-history{display:flex;flex-direction:column;gap:12px;max-height:245px;min-height:80px;overflow:auto;margin:14px 0}
+.text-command-turn{display:flex;flex-direction:column;gap:7px}.text-command-turn p{margin:0;padding:9px 12px;border-radius:10px;font-size:12px;overflow-wrap:anywhere}
+.text-command-user{align-self:flex-end;background:#17434c;color:#d5faf5;max-width:85%}
+.text-command-reply{align-self:flex-start;background:#0c1a29;border:1px solid #284153;color:#bcd5e2;max-width:90%}
+.text-command-form{display:flex;gap:8px}.text-command-form input{min-width:0;flex:1;background:#0b1b2a;border:1px solid #2a4557;border-radius:8px;color:#e5eefb;padding:10px 12px}
+.text-command-form button{background:#2bb7ad;border:0;border-radius:8px;color:#06252b;font-weight:800;padding:0 17px}

@@ -88,6 +88,9 @@ ADR-0006 기준. 브라우저는 Nginx(80) 하나로 들어오고 `/` → React,
 
 `{"action":"start|stop|resume|priority|answer|reset_zone|palletize|plan"}` 하나만 받는다. 로컬 Nginx의 `X-Real-IP`가 `127.0.0.1` 또는 `::1`일 때만 `202`와 `request_id`를 반환하고, 고정 문구 코드만 MQTT `voss/voice/request`로 보낸다. 브리지가 `/voss/voice/say`로 전달하고 Nodes PC의 `speech_out`이 재생한다. 응답은 MQTT 전송 접수이며 실제 스피커 출력이나 로봇 동작 완료를 보장하지 않는다.
 
+### `POST /api/voice/text` — 로컬 관제 화면 자연어 명령
+요청은 `{"request_id":"<UUID>","text":"역삼, 대치 순서로 팔레타이징 실행해"}`다. 텍스트는 1~240자이며 Web PC 로컬 `X-Real-IP`만 허용한다. `202`는 MQTT 전달 접수일 뿐이다. 텍스트는 `voss/voice/text` → `hmi_bridge` → ROS `intent_parser`로 가서 음성과 같은 동·구역 검증을 받는다. 해석 결과 문구는 MQTT `voss/voice/text/reply` → SSE `text_reply`로 반환한다. `"팔레타이징 실행해"`처럼 배송 순서가 없으면 실행하지 않고 순서를 묻는다. 실제 명령 접수·완료 여부는 별도 로봇 상태로 확인한다.
+
 ### `GET /api/stream` — SSE (React 실시간 갱신)
 | event | data | 원천 |
 |---|---|---|
@@ -99,6 +102,7 @@ ADR-0006 기준. 브라우저는 Nginx(80) 하나로 들어오고 `/` → React,
 | `robot_pose` | `voss/robot_pose` JSON 그대로 | TCP base_link 좌표, 최대 20 Hz. 재전송 없음 |
 | `robot_joints` | `voss/robot_joints` JSON 그대로 | 기존 6축 JointState, rad, 최대 20 Hz. 저장·재전송 없음. [상세](robot_joints_fk_proposal.md) |
 | `voice_status` | `{"phase","event_id","utterance_id"}` | 음성 표시등. retained 거부·snapshot 없음. [상세](voice_status.md) |
+| `text_reply` | `{"request_id","message"}` | 텍스트 명령 해석 결과 안내. retained 거부·snapshot 없음 |
 | `box_motion` (제안) | `voss/box_motion` JSON 그대로 | BoxMotion GRASPED/RELEASED. 저장·재전송 없음. [제안](box_carry_proposal.md) |
 | `command_ack` | `voss/command/ack` JSON | Command 응답 |
 | `log_status` | `{"status": "OK|DB_ERROR|SPOOL_FULL|STARTING", "stamp": "…"}` | `/voss/log/status` (hmi_bridge 전달) |

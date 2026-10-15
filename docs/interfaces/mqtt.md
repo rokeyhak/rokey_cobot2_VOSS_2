@@ -14,10 +14,12 @@
 - **확정:** Mosquitto 는 공용 PC **호스트**에서 1883/TCP 로 실행한다(ADR-0006, #55 MC-026, #20). Spring Boot 와 hmi_bridge 는 모두 `127.0.0.1:1883` 로 연결한다.
 - Mosquitto listener 자체는 `0.0.0.0:1883` 을 사용하되 방화벽으로 노출을 제한한다. `enp4s0`(로봇망)은 항상 차단한다. `wlo1` 은 개발 중 개인 PC의 읽기 전용 디버깅이 필요할 때만 임시로 열고, **시연 때는 1883/wlo1 을 닫는다**. HMI는 공용 PC의 Spring Boot가 로컬로 붙으므로 시연 기능에는 영향이 없다.
 - `allow_anonymous false`. 비밀번호 파일과 실제 비밀번호는 Git에 넣지 않고 공용 PC에서 생성한다(`.env`/로컬 파일만). ACL은 아래처럼 고정한다.
-  - `web`: `voss/command`·`voss/voice/request` write, `voss/#` read
-  - `bridge`: `voss/command`·`voss/voice/request` read. write는 #20 확정 6개(`voss/state`·`voss/result`·`voss/zone_map`·`voss/robot`·`voss/command/ack`·`voss/log_status`)와 10/14 승인 표시 토픽 `voss/box_track`·`voss/robot_pose`·`voss/robot_joints`·`voss/voice_status`, Sprint 2 `voss/pallet/state`, 제안 `voss/box_motion`(발행자 생기기 전엔 쓰지 않음)만 허용한다 (`voss/command` write 금지). 템플릿 = `docker/mqtt/acl`
+  - `web`: `voss/command`·`voss/voice/request`·`voss/voice/text` write, `voss/#` read
+  - `bridge`: `voss/command`·`voss/voice/request`·`voss/voice/text` read. write는 #20 확정 6개(`voss/state`·`voss/result`·`voss/zone_map`·`voss/robot`·`voss/command/ack`·`voss/log_status`)와 10/14 승인 표시 토픽 `voss/box_track`·`voss/robot_pose`·`voss/robot_joints`·`voss/voice_status`, Sprint 2 `voss/pallet/state`, 텍스트 응답 `voss/voice/text/reply`, 제안 `voss/box_motion`(발행자 생기기 전엔 쓰지 않음)만 허용한다 (`voss/command` write 금지). 템플릿 = `docker/mqtt/acl`
   - `debug`: `voss/#` read only
   - `voice_preview`: `voss/voice_status` write 하나만 (격리 음성 시험 전용, 아래 "음성 표시등 이벤트")
+
+웹 텍스트 명령: `web`은 `voss/voice/text`에 QoS 1·retain false로 `{request_id,text,sent_at}`를 보낸다. 운영 `bridge`는 30초 이내 UUID 요청만 `/voss/voice/text` ROS 토픽으로 전달하고 중복 ID를 버린다. `intent_parser`는 음성과 같은 검증을 거쳐 `/voss/voice/text/reply`로 `{request_id,message}`를 보낸다. `bridge`는 이를 `voss/voice/text/reply`로 발행하고 웹은 SSE `text_reply`로 표시한다. `voice_preview` 계정은 이 토픽들에 접근하지 않는다.
 - 런타임 계정의 비밀번호는 환경 변수로 주입한다. hmi_bridge 는 `VOSS_MQTT_BRIDGE_PASSWORD`, Spring Boot 는 웹 컨테이너의 MQTT 비밀번호 변수를 사용한다.
 
 ## 토픽

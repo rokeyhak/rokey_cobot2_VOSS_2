@@ -123,6 +123,14 @@ def test_command_acknowledgement_follows_intent():
     assert said == ["분류를 시작하겠습니다."]
 
 
+def test_text_palletize_without_route_asks_instead_of_publishing():
+    f, published, said = _flow(lambda *_: {"type": "palletize", "route": []})
+    replies = []
+    assert f.handle("팔레타이징 실행해", report=replies.append)[0] == "say"
+    assert not published
+    assert replies == said and "순서" in replies[0]
+
+
 def test_answer_uses_state_at_utterance_time():
     seen = {}
 

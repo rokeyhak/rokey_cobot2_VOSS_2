@@ -14,6 +14,8 @@ import { parseBoxMotion, parseBoxTrack, parseRobotPose, POSE_STALE_MS, TRACK_STA
 import type { BoxMotionSample, BoxTrackSample, RobotPoseSample } from './lib/workspacePosition';
 import { GripperCameraPanel } from './components/GripperCameraPanel';
 import { UsbCameraPanel } from './components/UsbCameraPanel';
+import { TextCommandPanel } from './components/TextCommandPanel';
+import type { TextReply } from './components/TextCommandPanel';
 import { parseVoiceSignal } from './lib/voiceIndicator';
 import type { VoiceSignal } from './lib/voiceIndicator';
 type DisplayState = 'UNKNOWN'|string;
@@ -66,6 +68,7 @@ export default function App() {
   const [busy,setBusy] = useState(false);
   const [clock,setClock] = useState(Date.now());
   const [voiceSignal,setVoiceSignal] = useState<VoiceSignal|null>(null);
+  const [textReply,setTextReply] = useState<TextReply|null>(null);
   const isLocal = LOCAL_HOSTS.has(location.hostname);
   const palletPreview = isLocal && new URLSearchParams(location.search).has('palletReplay');
   const displayState:DisplayState = sseConnected && stateReceivedAt !== null && clock-stateReceivedAt < TIMEOUT_MS ? (state?.state ?? 'UNKNOWN') : 'UNKNOWN';
@@ -233,9 +236,22 @@ export default function App() {
         console.error('[VOSS HMI] voice_status 파싱 실패',failure);
       }
     });
+    stream.addEventListener('text_reply',(event)=>{
+      try {
+        const reply = JSON.parse((event as MessageEvent).data) as TextReply;
+        if (typeof reply.request_id === 'string' && typeof reply.message === 'string') setTextReply(reply);
+      } catch (failure) {
+        console.error('[VOSS HMI] text_reply 파싱 실패',failure);
+      }
+    });
     stream.addEventListener('command_ack',(event)=>{
       const ack = JSON.parse((event as MessageEvent).data) as {command_id?:string;ok?:boolean;message?:string};
       setNotice(`명령 접수 확인: ${ack.ok ? '성공':'거부'} · ${ack.message ?? ack.command_id ?? '응답 없음'} (동작 완료와 별개)`);
+      if (ack.ok && ack.message === 'PALLET 비움' && !palletPreview) {
+        palletFromSse.current = true;
+        setPalletSource('live');
+        setPallet(emptyPallet());
+      }
       void refresh();
     });
     return ()=>stream.close();
@@ -339,6 +355,7 @@ export default function App() {
             {voiceNotice && <p className="inline-notice" role="alert">{voiceNotice}</p>}
             {state?.pending_question&&<p className="question">질문 대기 · {state.pending_question}</p>}
           </section>
+          <TextCommandPanel connected={sseConnected && mqtt==='UP'} enabled={isLocal} reply={textReply}/>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">02 / DISTRIBUTION</span><h2>구역별 적재 현황</h2></div><span className="micro-note">PostgreSQL 공식 집계</span></div><div className="zone-grid">{ZONES.map(zone=><div key={zone} className="zone-tile"><span className={`zone-symbol zone-${zone.toLowerCase()}`}>{zone==='RECHECK'?'R':zone==='HOLD'?'H':zone}</span><div><strong>{zone}</strong><small>{zone==='HOLD'?'보류 구역':zone==='RECHECK'?'재확인 구역':'기본 적재 구역'}</small></div><b>{summary?String(summary.by_zone[zone]??0):'—'}<small>건</small></b></div>)}</div></section>
         </div>
         <div className="dashboard-column">

@@ -48,3 +48,6 @@ export function issueCommand(type:CommandType,args:CommandArgs={}):Promise<{comm
 export function announceVoice(action:CommandType|'plan'):Promise<{request_id:string}> {
   return request('/api/voice/announce',{method:'POST',body:JSON.stringify({action})});
 }
+export function submitTextCommand(text:string,requestId:string):Promise<{request_id:string}> {
+  return request('/api/voice/text',{method:'POST',body:JSON.stringify({text,request_id:requestId})});
+}

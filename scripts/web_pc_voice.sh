@@ -7,6 +7,9 @@ source "$repo_dir/install/setup.bash"
 set -u
 export ROS_DOMAIN_ID=30
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROS_STATIC_PEERS="${ROS_STATIC_PEERS:-172.24.3.240}"
+unset CYCLONEDDS_URI
 export PYTHONUNBUFFERED=1
 
 visible_nodes="$(ros2 node list)"

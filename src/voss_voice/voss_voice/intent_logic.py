@@ -51,6 +51,7 @@ PALLETIZE_RE = re.compile(
     r"|(?:실어|싣|적재|태워|올려|옮겨).*(?:트럭|팔레트)"
     r"|순(?:서)?(?:대로|으로|로)?(?:실어|싣|적재)"
 )
+PALLETIZE_START_RE = re.compile(r"팔레타이징(?:을)?(?:실행|시작)(?:해|해줘|해주세요|하자|합니다|해요)?")
 SAY_PALLET_ORDER = (
     "싣는 순서를 동 이름으로 말씀해 주세요. 예를 들어 대치, 역삼, 청담 순서로 실어줘."
 )
@@ -260,6 +261,8 @@ def decide_palletize(raw_text: str, view: ZoneMapView | None) -> Decision | None
     """'대치, 역삼, 청담 순서로 실어줘' → palletize, route = 말한 순서 [대치동, 역삼동, 청담동](배송 순서, BRD TR-PAL-01).
     동을 하나도 말하지 않거나 4곳 이상이면 되묻는다. 받을 수 있는 상태인지는 sort_manager 가 판단한다."""
     s = _squash(raw_text)
+    if PALLETIZE_START_RE.fullmatch(s):
+        return Decision("say", say=SAY_PALLET_ORDER)
     if PALLETIZE_RE.search(s) is None:
         return None
     if view is None:

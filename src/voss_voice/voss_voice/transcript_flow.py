@@ -55,7 +55,7 @@ class TranscriptFlow:
         self.state = ""
         self.box_id = ""
 
-    def handle(self, text: str) -> tuple[str, float]:
+    def handle(self, text: str, report: Callable[[str], None] | None = None) -> tuple[str, float]:
         """음성 문장 하나를 처리하고 결과 종류와 처리 시간을 반환한다."""
         text = text.strip()
 
@@ -63,6 +63,10 @@ class TranscriptFlow:
             return "empty", 0.0
 
         t0 = self._clock()
+        def say(message: str) -> None:
+            if report is not None and message:
+                report(message)
+            self._say(message)
 
         # 발화 당시 로봇 상태와 박스 ID를 저장한다.
         state = self.state
@@ -72,12 +76,12 @@ class TranscriptFlow:
         if is_stop(text):
             intent = stop_decision(text).intent
             self._publish(intent)
-            self._say(command_acknowledgement(intent))
+            say(command_acknowledgement(intent))
             return "stop", 1000 * (self._clock() - t0)
 
         # 2. 다른 지시를 처리 중이면 기다리지 않고 안내한다.
         if not self._llm_lock.acquire(blocking=False):
-            self._say(SAY_BUSY)
+            say(SAY_BUSY)
             return "busy", 1000 * (self._clock() - t0)
 
         try:
@@ -114,11 +118,11 @@ class TranscriptFlow:
                         )
                     except IntentParseError:
                         # 계약: 파싱 실패 시 명령을 실행하지 않고 되묻는다.
-                        self._say(SAY_RETRY)
+                        say(SAY_RETRY)
                         return "say", 1000 * (self._clock() - t0)
 
                     if llm is None:
-                        self._say(SAY_AI_DOWN)
+                        say(SAY_AI_DOWN)
                         return "say", 1000 * (self._clock() - t0)
 
                 d = decide(
@@ -133,10 +137,10 @@ class TranscriptFlow:
             # 6. 최종 판단 결과에 따라 발행하거나 답한다.
             if d.kind == "publish":
                 self._publish(d.intent)
-                self._say(command_acknowledgement(d.intent))
+                say(command_acknowledgement(d.intent))
 
             elif d.kind == "query":
-                self._say(
+                say(
                     stats_sentence(
                         d.query,
                         self._get_stats(d.query),
@@ -144,7 +148,7 @@ class TranscriptFlow:
                 )
 
             else:
-                self._say(d.say)
+                say(d.say)
 
             return d.kind, 1000 * (self._clock() - t0)
 

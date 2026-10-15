@@ -62,3 +62,32 @@
 .text-command-reply{align-self:flex-start;background:#0c1a29;border:1px solid #284153;color:#bcd5e2;max-width:90%}
 .text-command-form{display:flex;gap:8px}.text-command-form input{min-width:0;flex:1;background:#0b1b2a;border:1px solid #2a4557;border-radius:8px;color:#e5eefb;padding:10px 12px}
 .text-command-form button{background:#2bb7ad;border:0;border-radius:8px;color:#06252b;font-weight:800;padding:0 17px}
+
+/* 화면을 바꿔도 대화가 남는 사이드바 채팅과 연결 상태. */
+.sidebar{width:308px;height:100dvh;padding:22px 16px 16px;overflow-y:auto}
+.sidebar .brand{margin-bottom:22px}
+.sidebar .navigation{margin-bottom:16px}
+.sidebar .text-command-panel{display:flex;flex:1;flex-direction:column;min-height:180px;padding:16px 13px;box-shadow:none}
+.sidebar .text-command-panel .section-heading{display:block;margin-bottom:0}
+.sidebar .text-command-panel .section-heading h2{font-size:15px}
+.sidebar .text-command-panel .section-heading .micro-note{display:block;margin-top:6px;text-align:left}
+.sidebar .text-command-history{flex:1;min-height:0;max-height:none;margin:12px -3px;padding:3px;overflow-y:auto}
+.sidebar .text-command-history .empty{padding:18px 5px;line-height:1.6}
+.sidebar .text-command-turn p{font-size:11px;line-height:1.5}
+.sidebar .text-command-form{flex-shrink:0;gap:5px}
+.sidebar .text-command-form input{padding:9px 8px;font-size:11px}
+.sidebar .text-command-form button{padding:0 10px;font-size:11px}
+.sidebar .text-command-panel>.micro-note{margin:8px 0 0;text-align:left}
+.sidebar-bottom{flex-shrink:0;margin-top:12px;padding:13px 14px}
+.sidebar-bottom p{margin:9px 0;font-size:11px}
+.sidebar-status-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sidebar-status-heading .live-pill{padding:5px 8px;font-size:10px}
+@media(max-width:1200px) and (min-width:701px){.sidebar{width:270px}}
+@media(max-width:700px){
+  .sidebar{width:100%;height:auto;overflow:visible;display:flex;flex-direction:column;align-items:stretch;gap:12px}
+  .sidebar .brand,.sidebar .navigation{margin:0}
+  .sidebar .navigation{order:0;width:100%}
+  .sidebar .text-command-panel{order:1;flex:none;width:100%;height:320px}
+  .sidebar-bottom{order:2;width:100%;margin:0;background:#101f2d;border:1px solid #203445}
+  .sidebar-bottom p,.sidebar-bottom .eyebrow,.sidebar-bottom .muted{display:block}
+}

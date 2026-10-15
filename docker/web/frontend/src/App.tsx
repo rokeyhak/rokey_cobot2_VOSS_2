@@ -319,10 +319,11 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-symbol">V</div><div><strong>VOSS</strong><small>C-3 SORTING SYSTEM</small></div></div>
       <nav className="navigation" aria-label="주 메뉴"><button type="button" className={activePage==='dashboard'?'nav-on':''} aria-current={activePage==='dashboard'?'page':undefined} onClick={()=>{setVoiceSignal(null);setActivePage('dashboard');}}>▣   관제 대시보드</button><button type="button" className={activePage==='cameras'?'nav-on':''} aria-current={activePage==='cameras'?'page':undefined} onClick={()=>{setVoiceSignal(null);setActivePage('cameras');}}>▣   카메라</button></nav>
-      <div className="sidebar-bottom"><span className="eyebrow">SYSTEM STATUS</span><p><span className={`status-led ${displayMqtt==='UP'?'is-up':''}`}/> MQTT {displayMqtt}</p><p><span className={`status-led ${sseConnected?'is-up':''}`}/> 실시간 SSE {sseConnected?'연결':'끊김'}</p><p><span className={`status-led ${displayLogStatus==='OK'?'is-up':''}`}/> DB Logger {displayLogStatus}</p><div className="muted tiny">공식 기록: PostgreSQL sort_log</div></div>
+      <TextCommandPanel connected={sseConnected && mqtt==='UP'} enabled={isLocal} reply={textReply}/>
+      <div className="sidebar-bottom"><div className="sidebar-status-heading"><span className="eyebrow">SYSTEM STATUS</span><span className={`live-pill ${sseConnected?'connected':'disconnected'}`}>{sseConnected?'● LIVE':'● OFFLINE'}</span></div><p><span className={`status-led ${displayMqtt==='UP'?'is-up':''}`}/> MQTT {displayMqtt}</p><p><span className={`status-led ${sseConnected?'is-up':''}`}/> 실시간 SSE {sseConnected?'연결':'끊김'}</p><p><span className={`status-led ${displayLogStatus==='OK'?'is-up':''}`}/> DB Logger {displayLogStatus}</p><div className="muted tiny">공식 기록: PostgreSQL sort_log</div></div>
     </aside>
     <main className="workspace">
-      <header className="top-bar"><div><div className="eyebrow">OPERATION CENTER / LIVE MONITORING</div><h1>{activePage==='cameras'?'카메라 모니터링':'물류 분류 관제'}</h1><p className="subhead">{activePage==='cameras'?'현장 카메라 영상을 확인하세요.':'로봇 동작, 박스 판독과 세션 기록을 한눈에 확인하세요.'}</p></div><div className="header-end"><span className="clock-label">{new Date(clock).toLocaleString('ko-KR')}</span><span className={`live-pill ${sseConnected?'connected':'disconnected'}`}>{sseConnected?'● LIVE':'● OFFLINE'}</span></div></header>
+      <header className="top-bar"><div><div className="eyebrow">OPERATION CENTER / LIVE MONITORING</div><h1>{activePage==='cameras'?'카메라 모니터링':'물류 분류 관제'}</h1><p className="subhead">{activePage==='cameras'?'현장 카메라 영상을 확인하세요.':'로봇 동작, 박스 판독과 세션 기록을 한눈에 확인하세요.'}</p></div><div className="header-end"><span className="clock-label">{new Date(clock).toLocaleString('ko-KR')}</span></div></header>
       {activePage==='cameras' ? <div className="camera-page"><UsbCameraPanel /><GripperCameraPanel /></div> : <>
       <div className="dashboard-columns">
         <div className="dashboard-column">
@@ -355,7 +356,6 @@ export default function App() {
             {voiceNotice && <p className="inline-notice" role="alert">{voiceNotice}</p>}
             {state?.pending_question&&<p className="question">질문 대기 · {state.pending_question}</p>}
           </section>
-          <TextCommandPanel connected={sseConnected && mqtt==='UP'} enabled={isLocal} reply={textReply}/>
           <section className="panel"><div className="section-heading"><div><span className="eyebrow">02 / DISTRIBUTION</span><h2>구역별 적재 현황</h2></div><span className="micro-note">PostgreSQL 공식 집계</span></div><div className="zone-grid">{ZONES.map(zone=><div key={zone} className="zone-tile"><span className={`zone-symbol zone-${zone.toLowerCase()}`}>{zone==='RECHECK'?'R':zone==='HOLD'?'H':zone}</span><div><strong>{zone}</strong><small>{zone==='HOLD'?'보류 구역':zone==='RECHECK'?'재확인 구역':'기본 적재 구역'}</small></div><b>{summary?String(summary.by_zone[zone]??0):'—'}<small>건</small></b></div>)}</div></section>
         </div>
         <div className="dashboard-column">

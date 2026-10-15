@@ -1,34 +1,71 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RequestFailure, submitTextCommand } from '../api';
+import type { PalletState } from '../types';
 
 export interface TextReply { request_id: string; message: string }
-interface Entry { id: string; text: string; reply: string }
+export interface ChatQuestion { key: string; boxId: string; text: string }
+type Entry = { kind: 'command'; id: string; text: string; reply: string }
+  | { kind: 'notice'; id: string; text: string };
 
-export function TextCommandPanel({connected, enabled, reply}: {
+export function TextCommandPanel({connected, enabled, reply, asking, pallet}: {
   connected: boolean; enabled: boolean; reply: TextReply | null;
+  asking: ChatQuestion | null; pallet: PalletState | null;
 }) {
   const [text, setText] = useState('');
   const [entries, setEntries] = useState<Entry[]>([]);
   const [sending, setSending] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const lastQuestion = useRef<string | null>(null);
+  const lastPallet = useRef<{runId:string;state:string} | null>(null);
 
   useEffect(() => {
     if (!reply) return;
-    setEntries(current => current.map(entry => entry.id === reply.request_id
+    setEntries(current => current.map(entry => entry.kind === 'command' && entry.id === reply.request_id
       ? {...entry, reply: reply.message} : entry));
   }, [reply]);
+
+  useEffect(() => {
+    if (!asking) { lastQuestion.current = null; return; }
+    if (lastQuestion.current === asking.key) return;
+    lastQuestion.current = asking.key;
+    setEntries(current => [...current.slice(-29), {
+      kind:'notice', id:`asking:${asking.key}`, text:`재확인 질문 · ${asking.boxId}\n${asking.text}`,
+    }]);
+  }, [asking]);
+
+  useEffect(() => {
+    if (!pallet) { lastPallet.current = null; return; }
+    const previous = lastPallet.current;
+    lastPallet.current = {runId:pallet.run_id,state:pallet.state};
+    let message = '';
+    if (pallet.run_id && pallet.state === 'RUNNING' && previous?.runId !== pallet.run_id) {
+      message = `팔레타이징 시작 · ${pallet.route.join(' → ')}`;
+    } else if (pallet.run_id && pallet.state === 'DONE' && previous?.runId === pallet.run_id && previous.state !== 'DONE') {
+      message = `팔레타이징 완료 · 적재 ${pallet.done}개${pallet.failed ? `, 실패 ${pallet.failed}개` : ''}`;
+    } else if (!pallet.run_id && previous?.runId) {
+      message = '트럭 짐칸 비움이 확인됐습니다.';
+    }
+    if (message) setEntries(current => [...current.slice(-29), {
+      kind:'notice', id:`pallet:${pallet.run_id}:${pallet.state}:${Date.now()}`, text:message,
+    }]);
+  }, [pallet]);
+
+  useEffect(() => {
+    if (historyRef.current) historyRef.current.scrollTop = historyRef.current.scrollHeight;
+  }, [entries]);
 
   async function send() {
     const message = text.trim();
     if (!message || !enabled || !connected || sending) return;
     const id = crypto.randomUUID();
-    setEntries(current => [...current.slice(-19), {id, text: message, reply: '명령 해석 중…'}]);
+    setEntries(current => [...current.slice(-29), {kind:'command', id, text: message, reply: '명령 해석 중…'}]);
     setText('');
     setSending(true);
     try {
       await submitTextCommand(message, id);
     } catch (error) {
       const detail = error instanceof RequestFailure ? `${error.code} · ${error.message}` : '전달에 실패했습니다.';
-      setEntries(current => current.map(entry => entry.id === id ? {...entry, reply: detail} : entry));
+      setEntries(current => current.map(entry => entry.kind === 'command' && entry.id === id ? {...entry, reply: detail} : entry));
     } finally {
       setSending(false);
     }
@@ -36,9 +73,11 @@ export function TextCommandPanel({connected, enabled, reply}: {
 
   return <section className="panel text-command-panel">
     <div className="section-heading"><div><span className="eyebrow">TEXT / INTENT</span><h2>텍스트 명령</h2></div><span className="micro-note">Web PC 로컬 입력</span></div>
-    <div className="text-command-history" role="log" aria-live="polite">
+    <div className="text-command-history" role="log" aria-live="polite" ref={historyRef}>
       {entries.length === 0 && <p className="empty">예: 역삼, 대치 순서로 팔레타이징 실행해</p>}
-      {entries.map(entry => <div className="text-command-turn" key={entry.id}>
+      {entries.map(entry => entry.kind === 'notice'
+        ? <p className="text-command-question" key={entry.id}>{entry.text}</p>
+        : <div className="text-command-turn" key={entry.id}>
         <p className="text-command-user">{entry.text}</p>
         <p className="text-command-reply">{entry.reply}</p>
       </div>)}

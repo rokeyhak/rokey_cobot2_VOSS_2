@@ -319,7 +319,11 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-symbol">V</div><div><strong>VOSS</strong><small>C-3 SORTING SYSTEM</small></div></div>
       <nav className="navigation" aria-label="주 메뉴"><button type="button" className={activePage==='dashboard'?'nav-on':''} aria-current={activePage==='dashboard'?'page':undefined} onClick={()=>{setVoiceSignal(null);setActivePage('dashboard');}}>▣   관제 대시보드</button><button type="button" className={activePage==='cameras'?'nav-on':''} aria-current={activePage==='cameras'?'page':undefined} onClick={()=>{setVoiceSignal(null);setActivePage('cameras');}}>▣   카메라</button></nav>
-      <TextCommandPanel connected={sseConnected && mqtt==='UP'} enabled={isLocal} reply={textReply}/>
+      <TextCommandPanel connected={sseConnected && mqtt==='UP'} enabled={isLocal} reply={textReply}
+        asking={displayState==='ASKING' && state?.box_id && state.pending_question
+          ? {key:`${state.session_id}:${state.box_id}:${state.pending_question}`,boxId:state.box_id,text:state.pending_question}
+          : null}
+        pallet={palletSource==='live' ? pallet : null}/>
       <div className="sidebar-bottom"><div className="sidebar-status-heading"><span className="eyebrow">SYSTEM STATUS</span><span className={`live-pill ${sseConnected?'connected':'disconnected'}`}>{sseConnected?'● LIVE':'● OFFLINE'}</span></div><p><span className={`status-led ${displayMqtt==='UP'?'is-up':''}`}/> MQTT {displayMqtt}</p><p><span className={`status-led ${sseConnected?'is-up':''}`}/> 실시간 SSE {sseConnected?'연결':'끊김'}</p><p><span className={`status-led ${displayLogStatus==='OK'?'is-up':''}`}/> DB Logger {displayLogStatus}</p><div className="muted tiny">공식 기록: PostgreSQL sort_log</div></div>
     </aside>
     <main className="workspace">

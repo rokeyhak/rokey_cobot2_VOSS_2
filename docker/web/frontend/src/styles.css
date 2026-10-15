@@ -62,6 +62,7 @@
 .text-command-reply{align-self:flex-start;background:#0c1a29;border:1px solid #284153;color:#bcd5e2;max-width:90%}
 .text-command-form{display:flex;gap:8px}.text-command-form input{min-width:0;flex:1;background:#0b1b2a;border:1px solid #2a4557;border-radius:8px;color:#e5eefb;padding:10px 12px}
 .text-command-form button{background:#2bb7ad;border:0;border-radius:8px;color:#06252b;font-weight:800;padding:0 17px}
+.text-command-question{align-self:stretch;margin:0;padding:10px 11px;border:1px solid #706044;border-left:3px solid #e9b66d;border-radius:9px;background:#292419;color:#f2d5a3;font-size:11px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere}
 
 /* 화면을 바꿔도 대화가 남는 사이드바 채팅과 연결 상태. */
 .sidebar{width:308px;height:100dvh;padding:22px 16px 16px;overflow-y:auto}

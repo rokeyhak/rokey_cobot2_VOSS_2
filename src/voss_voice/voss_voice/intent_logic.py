@@ -262,7 +262,7 @@ def decide_palletize(raw_text: str, view: ZoneMapView | None) -> Decision | None
     동을 하나도 말하지 않거나 4곳 이상이면 되묻는다. 받을 수 있는 상태인지는 sort_manager 가 판단한다."""
     s = _squash(raw_text)
     if PALLETIZE_START_RE.fullmatch(s):
-        return Decision("say", say=SAY_PALLET_ORDER)
+        return Decision("say", say=SAY_PALLET_ORDER if view is not None else SAY_NOT_READY)
     if PALLETIZE_RE.search(s) is None:
         return None
     if view is None:
@@ -278,6 +278,21 @@ def decide_palletize(raw_text: str, view: ZoneMapView | None) -> Decision | None
     if len(order) > MAX_ROUTE:
         return Decision("say", say=SAY_ROUTE_COUNT)
     return Decision("publish", intent=_intent("palletize", raw_text=raw_text, route=order))
+
+
+def decide_pallet_route_answer(raw_text: str, view: ZoneMapView | None) -> Decision | None:
+    """순서를 되물은 직후에는 동 이름 목록만으로도 팔레타이징 경로를 확정한다."""
+    if view is None:
+        return Decision("say", say=SAY_NOT_READY)
+    parts = re.split(r"\s*(?:,|→|->|/)\s*", raw_text.strip())
+    if len(parts) == 1:
+        parts = raw_text.split()
+    if not parts or not any(view.canonical_dong(part) for part in parts):
+        return None  # 다른 일반 명령은 기존 해석 경로로 보낸다.
+    route, error = check_route(parts, view)
+    if error:
+        return Decision("say", say=error)
+    return Decision("publish", intent=_intent("palletize", raw_text=raw_text, route=route))
 
 
 def decide_destination_answer(

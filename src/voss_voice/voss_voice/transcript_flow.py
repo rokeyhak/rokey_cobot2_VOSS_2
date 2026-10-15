@@ -14,7 +14,12 @@ from collections.abc import Callable
 
 from voss_voice.http_client import IntentParseError
 from voss_voice.intent_logic import (
+    SAY_PALLET_ORDER,
     SAY_RETRY,
+    SAY_ROUTE_COUNT,
+    SAY_ROUTE_DUP,
+    SAY_ROUTE_RETRY,
+    SAY_ROUTE_UNKNOWN,
     SayDeduper,
     ZoneMapView,
     command_acknowledgement,
@@ -22,6 +27,7 @@ from voss_voice.intent_logic import (
     decide_bare_dong,
     decide_destination_answer,
     decide_hold_answer,
+    decide_pallet_route_answer,
     decide_palletize,
     decide_recheck_start,
     is_stop,
@@ -31,6 +37,10 @@ from voss_voice.intent_logic import (
 
 SAY_AI_DOWN = "음성 해석 서비스에 연결할 수 없습니다. 잠시 후 다시 말씀해 주세요."
 SAY_BUSY = "앞 지시를 처리하고 있습니다. 잠시 후 다시 말씀해 주세요."
+PALLET_ROUTE_REPLY_WINDOW_S = 60.0
+PALLET_ROUTE_PROMPTS = {
+    SAY_PALLET_ORDER, SAY_ROUTE_RETRY, SAY_ROUTE_COUNT, SAY_ROUTE_DUP, SAY_ROUTE_UNKNOWN
+}
 
 
 class TranscriptFlow:
@@ -54,6 +64,7 @@ class TranscriptFlow:
         self.view: ZoneMapView | None = None
         self.state = ""
         self.box_id = ""
+        self._pallet_route_until = 0.0
 
     def handle(self, text: str, report: Callable[[str], None] | None = None) -> tuple[str, float]:
         """음성 문장 하나를 처리하고 결과 종류와 처리 시간을 반환한다."""
@@ -74,6 +85,7 @@ class TranscriptFlow:
 
         # 1. 정지 명령은 LLM이나 잠금을 기다리지 않는다.
         if is_stop(text):
+            self._pallet_route_until = 0.0
             intent = stop_decision(text).intent
             self._publish(intent)
             say(command_acknowledgement(intent))
@@ -87,8 +99,14 @@ class TranscriptFlow:
         try:
             view = self.view
 
-            # 3. 등록된 동 이름만 말했는지 먼저 확인한다.
-            d = decide_bare_dong(text, view, state, box_id)
+            # 팔레타이징 순서를 되물은 뒤에는 동 이름 목록만으로 답할 수 있다.
+            # 로봇이 ASKING 중이면 박스의 답변이 우선한다.
+            d = (decide_pallet_route_answer(text, view)
+                 if state != "ASKING" and t0 <= self._pallet_route_until else None)
+
+            # 3. 등록된 동 이름만 말했는지 확인한다.
+            if d is None:
+                d = decide_bare_dong(text, view, state, box_id)
 
             # 4. "역삼으로 보내"처럼 목적지를 답했는지 확인한다.
             if d is None:
@@ -136,10 +154,12 @@ class TranscriptFlow:
 
             # 6. 최종 판단 결과에 따라 발행하거나 답한다.
             if d.kind == "publish":
+                self._pallet_route_until = 0.0
                 self._publish(d.intent)
                 say(command_acknowledgement(d.intent))
 
             elif d.kind == "query":
+                self._pallet_route_until = 0.0
                 say(
                     stats_sentence(
                         d.query,
@@ -148,6 +168,8 @@ class TranscriptFlow:
                 )
 
             else:
+                self._pallet_route_until = (t0 + PALLET_ROUTE_REPLY_WINDOW_S
+                                            if d.say in PALLET_ROUTE_PROMPTS else 0.0)
                 say(d.say)
 
             return d.kind, 1000 * (self._clock() - t0)
